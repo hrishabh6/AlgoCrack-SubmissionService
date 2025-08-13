@@ -6,14 +6,11 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class SubmissionProducer {
+public class LogsProducer {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
 
-    public void sendToSubmissionQueue(String submissionJson) {
-        // Log the JSON string to be sent
-        System.out.println("Sending to submission-queue: " + submissionJson);
-
-        kafkaTemplate.send("submission-queue", submissionJson);
+    public void sendToLogsTopic(String logLine) {
+        kafkaTemplate.send("submission-logs", logLine);
     }
 }
