@@ -3,14 +3,15 @@ package com.hrishabh.algocracksubmissionservice.service;
 
 import com.hrishabh.algocracksubmissionservice.dto.SubmissionDto;
 import com.hrishabh.algocracksubmissionservice.producer.LogsProducer;
-import com.hrishabh.codeexecutionengine.dto.CodeExecutionResultDTO;
-import com.hrishabh.codeexecutionengine.dto.CodeSubmissionDTO;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import xyz.hrishabhjoshi.codeexecutionengine.dto.CodeExecutionResultDTO;
+import xyz.hrishabhjoshi.codeexecutionengine.dto.CodeSubmissionDTO;
 
 import java.util.Optional;
 
@@ -27,7 +28,7 @@ public class ExternalCodeRunnerService {
     private RestTemplate restTemplate;
 
     // Read the engine's URL from application.properties
-    @Value("${code-execution.engine.url:http://localhost:8081/api/v1/code-execution/run}")
+    @Value("${code-execution.engine.url:http://localhost:8080/api/v1/code-execution/run}")
     private String codeExecutionEngineUrl;
 
     public void processSubmission(SubmissionDto submissionDto) {

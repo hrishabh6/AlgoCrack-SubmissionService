@@ -6,13 +6,13 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {
+        "com.hrishabh.algocracksubmissionservice",
+        "xyz.hrishabhjoshi.codeexecutionengine"
+})
 @EntityScan("com.hrishabh.algocrackentityservice.models")
 @EnableJpaRepositories("com.hrishabh.algocracksubmissionservice.repository")
-@ComponentScan(basePackages = {
-        "com.hrishabh.algocracksubmissionservice",  // your app
-        "com.hrishabh.codeexecutionengine"          // your engine
-})
+
 public class AlgoCrackSubmissionServiceApplication {
 
     public static void main(String[] args) {

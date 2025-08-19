@@ -6,10 +6,12 @@ import com.hrishabh.algocrackentityservice.models.QuestionMetadata;
 import com.hrishabh.algocrackentityservice.models.TestCase;
 import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
 import com.hrishabh.algocracksubmissionservice.repository.TestcaseRepository;
-import com.hrishabh.codeexecutionengine.dto.CodeSubmissionDTO;
-import com.hrishabh.codeexecutionengine.dto.ParamInfoDTO;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import xyz.hrishabhjoshi.codeexecutionengine.dto.CodeSubmissionDTO;
+import xyz.hrishabhjoshi.codeexecutionengine.dto.ParamInfoDTO;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
