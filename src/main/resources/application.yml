@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: AlgoCrack-SubmissionService
+  datasource:
+    url: jdbc:mysql://localhost:3306/leetcode
+    username: root
+    password: hrishabh@123
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+  flyway:
+    baseline-on-migrate: true
+
+# Code Execution Service Configuration
+cxe:
+  service:
+    url: http://localhost:8081
+    timeout-seconds: 30
+
+# Async Processing Configuration
+async:
+  core-pool-size: 5
+  max-pool-size: 20
+  queue-capacity: 100
+
+# Logging
+logging:
+  level:
+    com.hrishabh.algocracksubmissionservice: DEBUG
