@@ -1,9 +1,8 @@
 package com.hrishabh.algocracksubmissionservice.controllers;
 
 import com.hrishabh.algocrackentityservice.models.Submission;
-import com.hrishabh.algocracksubmissionservice.dto.SubmissionDetailDto;
-import com.hrishabh.algocracksubmissionservice.dto.SubmissionRequestDto;
-import com.hrishabh.algocracksubmissionservice.dto.SubmissionResponseDto;
+import com.hrishabh.algocracksubmissionservice.dto.*;
+import com.hrishabh.algocracksubmissionservice.service.CustomExecutionService;
 import com.hrishabh.algocracksubmissionservice.service.SubmissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +20,7 @@ import java.util.List;
 public class SubmissionController {
 
     private final SubmissionService submissionService;
+    private final CustomExecutionService customExecutionService;
 
     /**
      * Submit code for execution.
@@ -57,5 +57,15 @@ public class SubmissionController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(submissionService.getUserSubmissions(userId, page, size));
+    }
+
+    /**
+     * Execute code with custom test cases (no judging, no persistence).
+     * Returns raw output for user to visually inspect correctness.
+     */
+    @PostMapping("/custom")
+    public ResponseEntity<CustomExecutionResponseDto> executeCustom(
+            @RequestBody CustomExecutionRequestDto request) {
+        return ResponseEntity.ok(customExecutionService.executeCustomTests(request));
     }
 }
