@@ -3,8 +3,8 @@ package com.hrishabh.algocracksubmissionservice.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrishabh.algocrackentityservice.models.SubmissionVerdict;
-import com.hrishabh.algocrackentityservice.models.TestCase;
 import com.hrishabh.algocracksubmissionservice.dto.SubmissionStatusDto;
+import com.hrishabh.algocracksubmissionservice.dto.internal.TestCaseOutput;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -12,7 +12,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * Service to validate execution results against expected test case outputs.
+ * Service to validate execution results against expected outputs.
+ * 
+ * In v2, expected outputs come from the oracle execution, not stored TestCase
+ * data.
  */
 @Slf4j
 @Service
@@ -22,14 +25,18 @@ public class ResultValidationService {
     private final ObjectMapper objectMapper;
 
     /**
-     * Validate execution results and determine verdict.
+     * Validate execution results against oracle outputs.
+     * 
+     * @param actualResults     User code execution results
+     * @param oracleOutputs     Expected outputs from oracle execution
+     * @param compilationOutput Compilation output (to detect compile errors)
+     * @return The verdict for the submission
      */
     public SubmissionVerdict validateResults(
             List<SubmissionStatusDto.TestCaseResult> actualResults,
-            List<TestCase> expectedTestCases,
-            String compilationOutput
-    ) {
-        // Check for compilation error - look for actual error indicators, not just non-empty
+            List<TestCaseOutput> oracleOutputs,
+            String compilationOutput) {
+        // Check for compilation error
         if (compilationOutput != null && !compilationOutput.isEmpty()
                 && containsCompilationError(compilationOutput)) {
             log.info("Compilation error detected");
@@ -50,16 +57,16 @@ public class ResultValidationService {
                 return SubmissionVerdict.RUNTIME_ERROR;
             }
 
-            // Get expected output
-            if (i >= expectedTestCases.size()) {
-                log.warn("Test case index {} out of bounds", i);
+            // Get expected output from oracle
+            if (i >= oracleOutputs.size()) {
+                log.warn("Oracle output index {} out of bounds", i);
                 continue;
             }
-            
-            TestCase expected = expectedTestCases.get(i);
+
+            String expectedOutput = oracleOutputs.get(i).getOutput();
 
             // Compare outputs
-            if (!outputsMatch(actual.getActualOutput(), expected.getExpectedOutput())) {
+            if (!outputsMatch(actual.getActualOutput(), expectedOutput)) {
                 log.info("Wrong answer on test case {}", i);
                 return SubmissionVerdict.WRONG_ANSWER;
             }
@@ -73,28 +80,42 @@ public class ResultValidationService {
      * Compare actual output with expected output.
      * Handles JSON comparison for complex types.
      */
-    private boolean outputsMatch(String actual, String expected) {
+    public boolean outputsMatch(String actual, String expected) {
+        System.out.println("[ResultValidationService] outputsMatch() called");
+        System.out.println("    actual (raw):   \"" + actual + "\"");
+        System.out.println("    expected (raw): \"" + expected + "\"");
+
         if (actual == null || expected == null) {
-            return actual == expected;
+            boolean result = actual == expected;
+            System.out.println("    Null check: result=" + result);
+            return result;
         }
 
         // Normalize whitespace
         actual = actual.trim();
         expected = expected.trim();
+        System.out.println("    actual (trimmed):   \"" + actual + "\"");
+        System.out.println("    expected (trimmed): \"" + expected + "\"");
 
         // Direct string match
         if (actual.equals(expected)) {
+            System.out.println("    Direct string match: TRUE");
             return true;
         }
+        System.out.println("    Direct string match: FALSE, trying JSON comparison...");
 
         // Try JSON comparison for arrays/objects
         try {
             JsonNode actualNode = objectMapper.readTree(actual);
             JsonNode expectedNode = objectMapper.readTree(expected);
-            return actualNode.equals(expectedNode);
+            boolean jsonMatch = actualNode.equals(expectedNode);
+            System.out.println("    JSON comparison result: " + jsonMatch);
+            return jsonMatch;
         } catch (Exception e) {
             // Not valid JSON, fall back to string comparison
             log.debug("JSON parsing failed, using string comparison");
+            System.out.println("    JSON parse failed: " + e.getMessage());
+            System.out.println("    Falling back to string comparison: " + actual.equals(expected));
             return actual.equals(expected);
         }
     }
@@ -103,14 +124,16 @@ public class ResultValidationService {
      * Count passed test cases.
      */
     public int countPassed(List<SubmissionStatusDto.TestCaseResult> results) {
-        if (results == null) return 0;
+        if (results == null)
+            return 0;
         return (int) results.stream()
                 .filter(r -> Boolean.TRUE.equals(r.getPassed()))
                 .count();
     }
 
     private boolean containsCompilationError(String output) {
-        if (output == null) return false;
+        if (output == null)
+            return false;
         String lower = output.toLowerCase();
         // Actual javac/python compilation errors
         return lower.contains("error:")

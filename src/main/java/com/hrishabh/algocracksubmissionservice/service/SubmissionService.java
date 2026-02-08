@@ -102,6 +102,6 @@ public class SubmissionService {
      * Get test cases for a question.
      */
     public List<TestCase> getTestCases(Long questionId) {
-        return testcaseRepository.findByQuestionIdOrderByOrderIndexAsc(questionId);
+        return testcaseRepository.findByQuestionId(questionId);
     }
 }
