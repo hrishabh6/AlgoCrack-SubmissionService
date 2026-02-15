@@ -173,6 +173,9 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
                 .returnType(metadata.getReturnType())
                 .parameters(parameters)
                 .customDataStructureNames(new ArrayList<>())
+                .mutationTarget(metadata.getMutationTarget())
+                .serializationStrategy(metadata.getSerializationStrategy())
+                .questionType(metadata.getQuestionType())
                 .build();
     }
 
@@ -192,6 +195,9 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
                                 .build())
                         .collect(Collectors.toList()))
                 .customDataStructureNames(bundle.getMetadata().getCustomDataStructureNames())
+                .mutationTarget(bundle.getMetadata().getMutationTarget())
+                .serializationStrategy(bundle.getMetadata().getSerializationStrategy())
+                .questionType(bundle.getMetadata().getQuestionType())
                 .build();
 
         // Convert testcases to CXE format (List<Map<String, Object>>)

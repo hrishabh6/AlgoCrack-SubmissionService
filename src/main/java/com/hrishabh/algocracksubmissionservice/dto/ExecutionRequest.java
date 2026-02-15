@@ -32,6 +32,9 @@ public class ExecutionRequest {
         private String returnType;
         private List<Parameter> parameters;
         private List<String> customDataStructureNames;
+        private String mutationTarget;
+        private String serializationStrategy;
+        private String questionType;
     }
 
     @Data

@@ -22,4 +22,18 @@ public interface QuestionMetadataRepository extends JpaRepository<QuestionMetada
     Optional<QuestionMetadata> findByQuestionIdAndLanguage(
             @Param("questionId") Long questionId,
             @Param("language") Language language);
+
+    /**
+     * Fetch QuestionMetadata with Question entity eagerly loaded.
+     * Needed for judging context (nodeType, isOutputOrderMatters from Question).
+     */
+    @Query("""
+                SELECT qm
+                FROM QuestionMetadata qm
+                JOIN FETCH qm.question q
+                WHERE q.id = :questionId AND qm.language = :language
+            """)
+    Optional<QuestionMetadata> findByQuestionIdAndLanguageWithQuestion(
+            @Param("questionId") Long questionId,
+            @Param("language") Language language);
 }

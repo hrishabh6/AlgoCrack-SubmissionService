@@ -3,7 +3,7 @@ package com.hrishabh.algocracksubmissionservice.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrishabh.algocrackentityservice.models.SubmissionVerdict;
-import com.hrishabh.algocracksubmissionservice.dto.SubmissionStatusDto;
+import com.hrishabh.algocracksubmissionservice.dto.internal.BatchExecutionResult;
 import com.hrishabh.algocracksubmissionservice.dto.internal.TestCaseOutput;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,31 +25,50 @@ public class ResultValidationService {
     private final ObjectMapper objectMapper;
 
     /**
-     * Validate execution results against oracle outputs.
+     * Validate user execution results against oracle execution results.
+     * Both results come from the same ExecutionAdapter pipeline.
      * 
-     * @param actualResults     User code execution results
-     * @param oracleOutputs     Expected outputs from oracle execution
-     * @param compilationOutput Compilation output (to detect compile errors)
+     * @param userResult   User code execution result (via ExecutionAdapter)
+     * @param oracleResult Oracle execution result (via ExecutionAdapter)
      * @return The verdict for the submission
      */
     public SubmissionVerdict validateResults(
-            List<SubmissionStatusDto.TestCaseResult> actualResults,
-            List<TestCaseOutput> oracleOutputs,
-            String compilationOutput) {
+            BatchExecutionResult userResult,
+            BatchExecutionResult oracleResult) {
         // Check for compilation error
-        if (compilationOutput != null && !compilationOutput.isEmpty()
-                && containsCompilationError(compilationOutput)) {
+        if (userResult.getCompilationOutput() != null && !userResult.getCompilationOutput().isEmpty()
+                && containsCompilationError(userResult.getCompilationOutput())) {
             log.info("Compilation error detected");
             return SubmissionVerdict.COMPILATION_ERROR;
         }
 
-        if (actualResults == null || actualResults.isEmpty()) {
+        // Check for non-success status
+        if (!userResult.isSuccess()) {
+            log.warn("User execution failed with status: {}", userResult.getStatus());
+            switch (userResult.getStatus()) {
+                case COMPILATION_ERROR:
+                    return SubmissionVerdict.COMPILATION_ERROR;
+                case RUNTIME_ERROR:
+                    return SubmissionVerdict.RUNTIME_ERROR;
+                case TIMEOUT:
+                    return SubmissionVerdict.TIME_LIMIT_EXCEEDED;
+                case MEMORY_LIMIT_EXCEEDED:
+                    return SubmissionVerdict.MEMORY_LIMIT_EXCEEDED;
+                default:
+                    return SubmissionVerdict.INTERNAL_ERROR;
+            }
+        }
+
+        List<TestCaseOutput> actualOutputs = userResult.getOutputs();
+        List<TestCaseOutput> oracleOutputs = oracleResult.getOutputs();
+
+        if (actualOutputs == null || actualOutputs.isEmpty()) {
             log.warn("No test case results received");
             return SubmissionVerdict.INTERNAL_ERROR;
         }
 
-        for (int i = 0; i < actualResults.size(); i++) {
-            SubmissionStatusDto.TestCaseResult actual = actualResults.get(i);
+        for (int i = 0; i < actualOutputs.size(); i++) {
+            TestCaseOutput actual = actualOutputs.get(i);
 
             // Check for runtime error
             if (actual.getError() != null && !actual.getError().isEmpty()) {
@@ -66,7 +85,7 @@ public class ResultValidationService {
             String expectedOutput = oracleOutputs.get(i).getOutput();
 
             // Compare outputs
-            if (!outputsMatch(actual.getActualOutput(), expectedOutput)) {
+            if (!outputsMatch(actual.getOutput(), expectedOutput)) {
                 log.info("Wrong answer on test case {}", i);
                 return SubmissionVerdict.WRONG_ANSWER;
             }
@@ -123,11 +142,11 @@ public class ResultValidationService {
     /**
      * Count passed test cases.
      */
-    public int countPassed(List<SubmissionStatusDto.TestCaseResult> results) {
-        if (results == null)
+    public int countPassed(List<TestCaseOutput> outputs) {
+        if (outputs == null)
             return 0;
-        return (int) results.stream()
-                .filter(r -> Boolean.TRUE.equals(r.getPassed()))
+        return (int) outputs.stream()
+                .filter(o -> o.getError() == null || o.getError().isEmpty())
                 .count();
     }
 

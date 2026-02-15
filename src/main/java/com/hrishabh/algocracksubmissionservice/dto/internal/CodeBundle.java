@@ -19,48 +19,48 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CodeBundle {
-    
+
     /**
      * Unique identifier for this execution (for tracking/logging).
      */
     private String executionId;
-    
+
     /**
      * The source code to execute.
      */
     private String code;
-    
+
     /**
      * Programming language.
      */
     private Language language;
-    
+
     /**
      * Question ID (for metadata lookup).
      */
     private Long questionId;
-    
+
     /**
      * User ID (optional, 0 for RUN mode).
      */
     private Long userId;
-    
+
     /**
      * All testcases to execute in a single batch.
      * CXE executes all testcases in one invocation.
      */
     private List<TestCaseInput> testcases;
-    
+
     /**
      * Question metadata for code execution.
      */
     private QuestionMetadataBundle metadata;
-    
+
     /**
      * Execution intent (RUN or SUBMIT) for logging/metrics.
      */
     private ExecutionIntent intent;
-    
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -71,8 +71,11 @@ public class CodeBundle {
         private String returnType;
         private List<Parameter> parameters;
         private List<String> customDataStructureNames;
+        private String mutationTarget;
+        private String serializationStrategy;
+        private String questionType;
     }
-    
+
     @Data
     @Builder
     @NoArgsConstructor
