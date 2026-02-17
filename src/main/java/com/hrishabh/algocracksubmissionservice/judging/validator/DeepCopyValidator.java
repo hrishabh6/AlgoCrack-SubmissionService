@@ -57,10 +57,21 @@ public class DeepCopyValidator implements OutputValidator {
                     outputStr, new TypeReference<List<List<Integer>>>() {
                     });
 
-            // Check 1: Non-empty graph (empty clone is trivially wrong for non-empty input)
+            // Check 1: Empty graph — valid only when oracle is also empty (null input)
             if (adjacencyList.isEmpty()) {
+                // Parse oracle to check if it's also empty
+                String oracleStr = oracleOutput instanceof String
+                        ? (String) oracleOutput
+                        : objectMapper.writeValueAsString(oracleOutput);
+                List<List<Integer>> oracleList = objectMapper.readValue(
+                        oracleStr, new TypeReference<List<List<Integer>>>() {
+                        });
+                if (oracleList.isEmpty()) {
+                    log.debug("[DeepCopyValidator] Both user and oracle graphs are empty — valid null graph case");
+                    return ValidationResult.passed();
+                }
                 return ValidationResult.failed(
-                        "Deep copy validation failed: output graph is empty");
+                        "Deep copy validation failed: output graph is empty but expected non-empty");
             }
 
             int nodeCount = adjacencyList.size();

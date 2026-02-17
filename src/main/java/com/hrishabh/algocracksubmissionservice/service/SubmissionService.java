@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.EntityManager;
+import com.hrishabh.algocracksubmissionservice.repository.UserRepository;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -32,7 +33,9 @@ public class SubmissionService {
     private final QuestionMetadataRepository questionMetadataRepository;
     private final TestcaseRepository testcaseRepository;
     private final SubmissionProcessingService processingService;
+    private final UserRepository userRepository;
     private final EntityManager entityManager;
+
     /**
      * Create a new submission and trigger async processing.
      */
@@ -42,7 +45,8 @@ public class SubmissionService {
         // Generate UUID for external reference
         String submissionId = UUID.randomUUID().toString();
         // Get user and question references
-        User user = entityManager.getReference(User.class, request.getUserId());
+        User user = userRepository.findByUserId(request.getUserId())
+                .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
         Question question = entityManager.getReference(Question.class, request.getQuestionId());
         // Create submission entity
         Submission submission = Submission.builder()
@@ -60,7 +64,8 @@ public class SubmissionService {
         submission = submissionRepository.save(submission);
         log.info("Submission {} created with status QUEUED", submissionId);
         // Trigger async processing AFTER this transaction commits
-        // This ensures the submission is visible in the database before async processing starts
+        // This ensures the submission is visible in the database before async
+        // processing starts
         final String submissionIdFinal = submissionId;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -83,8 +88,8 @@ public class SubmissionService {
     /**
      * Get user's submissions with pagination.
      */
-    public List<SubmissionDetailDto> getUserSubmissions(Long userId, int page, int size) {
-        return submissionRepository.findByUserIdOrderByQueuedAtDesc(userId, PageRequest.of(page, size))
+    public List<SubmissionDetailDto> getUserSubmissions(String userId, int page, int size) {
+        return submissionRepository.findByUser_UserIdOrderByQueuedAtDesc(userId, PageRequest.of(page, size))
                 .getContent()
                 .stream()
                 .map(SubmissionDetailDto::fromEntity)

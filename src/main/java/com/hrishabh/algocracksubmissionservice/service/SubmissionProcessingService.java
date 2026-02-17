@@ -348,7 +348,7 @@ public class SubmissionProcessingService {
                 .code(submission.getCode())
                 .language(Language.valueOf(submission.getLanguage().toUpperCase()))
                 .questionId(submission.getQuestion().getId())
-                .userId(submission.getUser().getId())
+                .userId(submission.getUser().getUserId())
                 .testcases(testcases)
                 .metadata(metaBundle)
                 .intent(ExecutionIntent.SUBMIT)

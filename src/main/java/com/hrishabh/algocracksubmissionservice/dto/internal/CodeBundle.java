@@ -43,7 +43,7 @@ public class CodeBundle {
     /**
      * User ID (optional, 0 for RUN mode).
      */
-    private Long userId;
+    private String userId;
 
     /**
      * All testcases to execute in a single batch.

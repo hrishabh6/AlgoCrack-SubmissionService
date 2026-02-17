@@ -109,7 +109,7 @@ public class CustomExecutionService {
 
         return ExecutionRequest.builder()
                 .submissionId(submissionId)
-                .userId(0L) // No user association for custom runs
+                .userId("ANONYMOUS") // No user association for custom runs
                 .questionId(request.getQuestionId())
                 .language(request.getLanguage())
                 .code(request.getCode())

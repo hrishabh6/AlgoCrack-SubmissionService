@@ -38,6 +38,13 @@ public class SubmissionController {
      */
     @PostMapping
     public ResponseEntity<SubmissionResponseDto> submit(@RequestBody SubmissionRequestDto request) {
+        System.out.println("\n" + "=".repeat(80));
+        System.out.println("[CONTROLLER] /submit ENDPOINT - REQUEST RECEIVED");
+        System.out.println("[CONTROLLER] userId (raw): '" + request.getUserId() + "' (type: "
+                + (request.getUserId() != null ? request.getUserId().getClass().getSimpleName() : "null") + ")");
+        System.out.println("[CONTROLLER] questionId: " + request.getQuestionId());
+        System.out.println("[CONTROLLER] language: " + request.getLanguage());
+        System.out.println("=".repeat(80) + "\n");
         Submission submission = submissionService.createAndProcess(request);
 
         return ResponseEntity.status(HttpStatus.ACCEPTED)
@@ -149,7 +156,7 @@ public class SubmissionController {
      */
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<SubmissionDetailDto>> getUserSubmissions(
-            @PathVariable Long userId,
+            @PathVariable String userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(submissionService.getUserSubmissions(userId, page, size));

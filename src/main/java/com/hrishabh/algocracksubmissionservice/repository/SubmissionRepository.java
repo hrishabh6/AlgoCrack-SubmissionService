@@ -24,12 +24,12 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
     /**
      * Get user's submissions ordered by most recent.
      */
-    Page<Submission> findByUserIdOrderByQueuedAtDesc(Long userId, Pageable pageable);
+    Page<Submission> findByUser_UserIdOrderByQueuedAtDesc(String userId, Pageable pageable);
 
     /**
      * Get user's submissions for a specific question.
      */
-    List<Submission> findByUserIdAndQuestionIdOrderByQueuedAtDesc(Long userId, Long questionId);
+    List<Submission> findByUser_UserIdAndQuestionIdOrderByQueuedAtDesc(String userId, Long questionId);
 
     /**
      * Count pending submissions in the system.

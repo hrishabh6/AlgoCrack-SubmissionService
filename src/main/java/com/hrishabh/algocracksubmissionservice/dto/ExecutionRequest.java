@@ -15,7 +15,7 @@ import java.util.Map;
 public class ExecutionRequest {
 
     private String submissionId;
-    private Long userId;
+    private String userId;
     private Long questionId;
     private String language;
     private String code;

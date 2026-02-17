@@ -17,7 +17,8 @@ import java.util.UUID;
 /**
  * Service for executing the oracle (reference solution) against testcases.
  * 
- * Key design principle: Execute oracle ONCE with ALL testcases in a single batch.
+ * Key design principle: Execute oracle ONCE with ALL testcases in a single
+ * batch.
  * This prevents O(N) CXE calls and keeps p99 latency constant.
  */
 @Slf4j
@@ -35,12 +36,12 @@ public class OracleExecutionService {
      * This is a BATCH operation - single CXE call regardless of testcase count.
      * 
      * @param questionId The question to fetch oracle for
-     * @param testcases All testcases to execute (batched)
+     * @param testcases  All testcases to execute (batched)
      * @return Execution result with oracle outputs for each testcase
      * @throws OracleMissingException if no oracle exists for the question
      */
     public BatchExecutionResult executeOracle(Long questionId, List<TestCaseInput> testcases) {
-        log.info("Executing oracle for question {} with {} testcases (batched)", 
+        log.info("Executing oracle for question {} with {} testcases (batched)",
                 questionId, testcases.size());
 
         System.out.println("\n" + "#".repeat(60));
@@ -55,7 +56,8 @@ public class OracleExecutionService {
 
         System.out.println("[OracleExecutionService] Oracle Found:");
         System.out.println("    language: " + oracle.getLanguage());
-        System.out.println("    sourceCode length: " + (oracle.getSourceCode() != null ? oracle.getSourceCode().length() : 0));
+        System.out.println(
+                "    sourceCode length: " + (oracle.getSourceCode() != null ? oracle.getSourceCode().length() : 0));
         System.out.println("    sourceCode preview (first 300 chars):");
         if (oracle.getSourceCode() != null) {
             System.out.println("--- ORACLE CODE START ---");
@@ -68,13 +70,13 @@ public class OracleExecutionService {
 
         // 2. Build code bundle for oracle execution
         String oracleExecutionId = "oracle-" + UUID.randomUUID().toString();
-        
+
         CodeBundle oracleBundle = CodeBundle.builder()
                 .executionId(oracleExecutionId)
                 .code(oracle.getSourceCode())
                 .language(oracle.getLanguage())
                 .questionId(questionId)
-                .userId(0L)  // Oracle is not user-specific
+                .userId("SYSTEM") // Oracle is not user-specific
                 .testcases(testcases)
                 .build();
 
@@ -107,14 +109,14 @@ public class OracleExecutionService {
         if (!result.isSuccess()) {
             log.error("[{}] Oracle execution failed: {}", oracleExecutionId, result.getStatus());
             System.out.println("[OracleExecutionService] ERROR: Oracle execution FAILED!");
-            throw new RuntimeException("Oracle execution failed for question " + questionId + 
+            throw new RuntimeException("Oracle execution failed for question " + questionId +
                     ": " + result.getErrorMessage());
         }
 
-        log.info("[{}] Oracle execution completed successfully with {} outputs", 
+        log.info("[{}] Oracle execution completed successfully with {} outputs",
                 oracleExecutionId, result.getOutputs().size());
         System.out.println("#".repeat(60) + "\n");
-        
+
         return result;
     }
 

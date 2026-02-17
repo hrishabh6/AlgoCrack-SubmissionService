@@ -11,7 +11,7 @@ import lombok.*;
 @AllArgsConstructor
 public class SubmissionRequestDto {
 
-    private Long userId;
+    private String userId;
     private Long questionId;
     private String language;
     private String code;

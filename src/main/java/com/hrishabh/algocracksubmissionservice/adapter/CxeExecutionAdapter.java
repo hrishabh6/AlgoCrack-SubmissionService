@@ -207,7 +207,7 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
 
         return ExecutionRequest.builder()
                 .submissionId(bundle.getExecutionId())
-                .userId(bundle.getUserId() != null ? bundle.getUserId() : 0L)
+                .userId(bundle.getUserId() != null ? bundle.getUserId() : "ANONYMOUS")
                 .questionId(bundle.getQuestionId())
                 .language(bundle.getLanguage().name())
                 .code(bundle.getCode())

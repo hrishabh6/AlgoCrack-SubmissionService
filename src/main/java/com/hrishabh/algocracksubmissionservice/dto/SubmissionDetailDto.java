@@ -23,7 +23,7 @@ public class SubmissionDetailDto {
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private String submissionId;
-    private Long userId;
+    private String userId;
     private Long questionId;
     private String language;
     private String code;
@@ -48,7 +48,7 @@ public class SubmissionDetailDto {
 
         return SubmissionDetailDto.builder()
                 .submissionId(submission.getSubmissionId())
-                .userId(submission.getUser() != null ? submission.getUser().getId() : null)
+                .userId(submission.getUser() != null ? submission.getUser().getUserId() : null)
                 .questionId(submission.getQuestion() != null ? submission.getQuestion().getId() : null)
                 .language(submission.getLanguage())
                 .code(submission.getCode())
