@@ -16,29 +16,27 @@ import java.util.Optional;
  */
 public interface SubmissionRepository extends JpaRepository<Submission, Long> {
 
-    /**
-     * Find submission by external UUID.
-     */
-    Optional<Submission> findBySubmissionId(String submissionId);
+        /**
+         * Find submission by external UUID.
+         */
+        Optional<Submission> findBySubmissionId(String submissionId);
 
-    /**
-     * Get user's submissions ordered by most recent.
-     */
-    Page<Submission> findByUser_UserIdOrderByQueuedAtDesc(String userId, Pageable pageable);
+        /**
+         * Get user's submissions ordered by most recent.
+         */
+        Page<Submission> findByUser_UserIdOrderByQueuedAtDesc(String userId, Pageable pageable);
 
-    /**
-     * Get user's submissions for a specific question.
-     */
-    List<Submission> findByUser_UserIdAndQuestionIdOrderByQueuedAtDesc(String userId, Long questionId);
+        /**
+         * Get user's submissions for a specific question.
+         */
+        /**
+         * Get user's submissions for a specific question with pagination.
+         */
+        Page<Submission> findByUser_UserIdAndQuestionIdOrderByQueuedAtDesc(String userId, Long questionId,
+                        Pageable pageable);
 
-    /**
-     * Count pending submissions in the system.
-     */
-    @Query("SELECT COUNT(s) FROM Submission s WHERE s.status IN :statuses")
-    Long countByStatusIn(@Param("statuses") List<SubmissionStatus> statuses);
-
-    /**
-     * Get all pending submissions.
-     */
-    List<Submission> findByStatusInOrderByQueuedAtAsc(List<SubmissionStatus> statuses);
+        /**
+         * Get all pending submissions.
+         */
+        List<Submission> findByStatusInOrderByQueuedAtAsc(List<SubmissionStatus> statuses);
 }

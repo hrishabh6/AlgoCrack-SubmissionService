@@ -157,9 +157,10 @@ public class SubmissionController {
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<SubmissionDetailDto>> getUserSubmissions(
             @PathVariable String userId,
+            @RequestParam(required = false) Long questionId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(submissionService.getUserSubmissions(userId, page, size));
+        return ResponseEntity.ok(submissionService.getUserSubmissions(userId, questionId, page, size));
     }
 
     /**

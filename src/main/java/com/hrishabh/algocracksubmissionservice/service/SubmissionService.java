@@ -7,6 +7,7 @@ import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataReposi
 import com.hrishabh.algocracksubmissionservice.repository.TestcaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -88,9 +89,16 @@ public class SubmissionService {
     /**
      * Get user's submissions with pagination.
      */
-    public List<SubmissionDetailDto> getUserSubmissions(String userId, int page, int size) {
-        return submissionRepository.findByUser_UserIdOrderByQueuedAtDesc(userId, PageRequest.of(page, size))
-                .getContent()
+    public List<SubmissionDetailDto> getUserSubmissions(String userId, Long questionId, int page, int size) {
+        Page<Submission> submissions;
+        if (questionId != null) {
+            submissions = submissionRepository.findByUser_UserIdAndQuestionIdOrderByQueuedAtDesc(userId, questionId,
+                    PageRequest.of(page, size));
+        } else {
+            submissions = submissionRepository.findByUser_UserIdOrderByQueuedAtDesc(userId, PageRequest.of(page, size));
+        }
+
+        return submissions.getContent()
                 .stream()
                 .map(SubmissionDetailDto::fromEntity)
                 .collect(Collectors.toList());
