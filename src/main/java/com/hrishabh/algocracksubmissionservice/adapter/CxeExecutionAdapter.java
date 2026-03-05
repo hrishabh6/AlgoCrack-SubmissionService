@@ -2,12 +2,12 @@ package com.hrishabh.algocracksubmissionservice.adapter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrishabh.algocracksubmissionservice.models.Language;
-import com.hrishabh.algocracksubmissionservice.models.QuestionMetadata;
+import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.dto.ExecutionRequest;
 import com.hrishabh.algocracksubmissionservice.dto.ExecutionResponse;
+import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.SubmissionStatusDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
-import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
 import com.hrishabh.algocracksubmissionservice.service.CodeExecutionClientService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 public class CxeExecutionAdapter implements ExecutionAdapter {
 
     private final CodeExecutionClientService cxeClient;
-    private final QuestionMetadataRepository metadataRepository;
+    private final ProblemServiceClient problemServiceClient;
     private final ObjectMapper objectMapper;
 
     private static final int MAX_POLL_ATTEMPTS = 60;
@@ -148,13 +148,14 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
     }
 
     /**
-     * Fetch question metadata from DB.
+     * Fetch question metadata via ProblemService API.
      */
     private CodeBundle.QuestionMetadataBundle fetchMetadata(Long questionId, Language language) {
-        QuestionMetadata metadata = metadataRepository
-                .findByQuestionIdAndLanguage(questionId, language)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Question metadata not found for questionId: " + questionId + ", language: " + language));
+        QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(questionId, language.name());
+        if (metadata == null) {
+            throw new IllegalArgumentException(
+                    "Question metadata not found for questionId: " + questionId + ", language: " + language);
+        }
 
         List<CodeBundle.Parameter> parameters = new ArrayList<>();
         List<String> paramNames = metadata.getParamNames();

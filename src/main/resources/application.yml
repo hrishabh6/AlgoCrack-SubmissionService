@@ -31,3 +31,8 @@ async:
 logging:
   level:
     com.hrishabh.algocracksubmissionservice: DEBUG
+
+# Inter-service communication
+services:
+  problem:
+    base-url: ${PROBLEM_SERVICE_URL:http://localhost:8080}

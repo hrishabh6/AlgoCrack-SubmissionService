@@ -1,9 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
-import com.hrishabh.algocracksubmissionservice.models.Language;
-import com.hrishabh.algocracksubmissionservice.models.QuestionMetadata;
+import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.dto.*;
-import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +24,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CustomExecutionService {
 
-    private final QuestionMetadataRepository metadataRepository;
+    private final ProblemServiceClient problemServiceClient;
     private final CodeExecutionClientService cxeClient;
     private final ObjectMapper objectMapper;
 
@@ -39,13 +37,14 @@ public class CustomExecutionService {
                 request.getQuestionId(), request.getLanguage());
 
         try {
-            // 1. Validate and fetch metadata
-            Language language = Language.valueOf(request.getLanguage().toUpperCase());
-            QuestionMetadata metadata = metadataRepository
-                    .findByQuestionIdAndLanguage(request.getQuestionId(), language)
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Question metadata not found for questionId: " + request.getQuestionId()
-                                    + ", language: " + language));
+            // 1. Validate and fetch metadata via ProblemService API
+            QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(
+                    request.getQuestionId(), request.getLanguage().toUpperCase());
+            if (metadata == null) {
+                throw new IllegalArgumentException(
+                        "Question metadata not found for questionId: " + request.getQuestionId()
+                                + ", language: " + request.getLanguage());
+            }
 
             // 2. Build execution request
             ExecutionRequest executionRequest = buildExecutionRequest(request, metadata);
@@ -77,7 +76,7 @@ public class CustomExecutionService {
      * Build execution request for CXE from custom test case request.
      */
     private ExecutionRequest buildExecutionRequest(CustomExecutionRequestDto request,
-            QuestionMetadata metadata) {
+            QuestionMetadataApiDto metadata) {
         // Generate a temporary submission ID for CXE tracking
         String submissionId = "custom-" + UUID.randomUUID().toString();
 

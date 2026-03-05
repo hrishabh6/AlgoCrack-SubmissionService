@@ -1,12 +1,13 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
-import com.hrishabh.algocracksubmissionservice.models.ReferenceSolution;
+import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
+import com.hrishabh.algocracksubmissionservice.dto.ReferenceSolutionDto;
+import com.hrishabh.algocracksubmissionservice.models.Language;
 import com.hrishabh.algocracksubmissionservice.adapter.ExecutionAdapter;
 import com.hrishabh.algocracksubmissionservice.dto.internal.BatchExecutionResult;
 import com.hrishabh.algocracksubmissionservice.dto.internal.CodeBundle;
 import com.hrishabh.algocracksubmissionservice.dto.internal.TestCaseInput;
 import com.hrishabh.algocracksubmissionservice.exception.OracleMissingException;
-import com.hrishabh.algocracksubmissionservice.repository.ReferenceSolutionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,7 +27,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OracleExecutionService {
 
-    private final ReferenceSolutionRepository oracleRepository;
+    private final ProblemServiceClient problemServiceClient;
     private final ExecutionAdapter executionAdapter;
 
     /**
@@ -50,9 +51,16 @@ public class OracleExecutionService {
         System.out.println("[OracleExecutionService] questionId: " + questionId);
         System.out.println("[OracleExecutionService] testcases count: " + testcases.size());
 
-        // 1. Fetch oracle
-        ReferenceSolution oracle = oracleRepository.findByQuestionId(questionId)
-                .orElseThrow(() -> new OracleMissingException(questionId));
+        // 1. Fetch oracle via ProblemService API
+        ReferenceSolutionDto oracle;
+        try {
+            oracle = problemServiceClient.getOracle(questionId);
+        } catch (Exception e) {
+            throw new OracleMissingException(questionId);
+        }
+        if (oracle == null || oracle.getSourceCode() == null) {
+            throw new OracleMissingException(questionId);
+        }
 
         System.out.println("[OracleExecutionService] Oracle Found:");
         System.out.println("    language: " + oracle.getLanguage());
@@ -74,7 +82,7 @@ public class OracleExecutionService {
         CodeBundle oracleBundle = CodeBundle.builder()
                 .executionId(oracleExecutionId)
                 .code(oracle.getSourceCode())
-                .language(oracle.getLanguage())
+                .language(Language.valueOf(oracle.getLanguage().toUpperCase()))
                 .questionId(questionId)
                 .userId("SYSTEM") // Oracle is not user-specific
                 .testcases(testcases)
@@ -124,6 +132,11 @@ public class OracleExecutionService {
      * Check if an oracle exists for a question.
      */
     public boolean hasOracle(Long questionId) {
-        return oracleRepository.findByQuestionId(questionId).isPresent();
+        try {
+            ReferenceSolutionDto oracle = problemServiceClient.getOracle(questionId);
+            return oracle != null && oracle.getSourceCode() != null;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

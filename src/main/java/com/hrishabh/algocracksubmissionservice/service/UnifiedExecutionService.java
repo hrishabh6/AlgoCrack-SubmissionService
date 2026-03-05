@@ -1,14 +1,15 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
+import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.adapter.ExecutionAdapter;
+import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.RunRequestDto;
 import com.hrishabh.algocracksubmissionservice.dto.RunResponseDto;
+import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.exception.OracleMissingException;
 import com.hrishabh.algocracksubmissionservice.judging.*;
-import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
-import com.hrishabh.algocracksubmissionservice.repository.TestcaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,8 +37,7 @@ public class UnifiedExecutionService {
         private final ExecutionAdapter executionAdapter;
         private final OracleExecutionService oracleService;
         private final RunGuardService runGuard;
-        private final QuestionMetadataRepository metadataRepository;
-        private final TestcaseRepository testcaseRepository;
+        private final ProblemServiceClient problemServiceClient;
         private final PipelineAssembler pipelineAssembler;
 
         /**
@@ -77,12 +77,13 @@ public class UnifiedExecutionService {
                         }
                         System.out.println("[UnifiedExecutionService] Step 3: Oracle validation PASSED");
 
-                        // 4. Fetch question metadata (with Question entity for judging context)
-                        Language language = Language.valueOf(request.getLanguage().toUpperCase());
-                        QuestionMetadata metadata = metadataRepository
-                                        .findByQuestionIdAndLanguageWithQuestion(request.getQuestionId(), language)
-                                        .orElseThrow(() -> new IllegalArgumentException(
-                                                        "Question metadata not found for language: " + language));
+                        // 4. Fetch question metadata via ProblemService API
+                        QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(
+                                        request.getQuestionId(), request.getLanguage().toUpperCase());
+                        if (metadata == null) {
+                                throw new IllegalArgumentException(
+                                                "Question metadata not found for language: " + request.getLanguage());
+                        }
 
                         System.out.println("[UnifiedExecutionService] Step 4: Question Metadata");
                         System.out.println("    functionName: " + metadata.getFunctionName());
@@ -196,11 +197,11 @@ public class UnifiedExecutionService {
                                                         .build())
                                         .collect(Collectors.toList());
                 } else {
-                        // DEFAULT testcases from DB
-                        List<TestCase> dbTestcases = testcaseRepository.findByQuestionIdAndType(
-                                        request.getQuestionId(), TestCaseType.DEFAULT);
+                        // DEFAULT testcases via ProblemService API
+                        List<TestCaseDto> apiTestcases = problemServiceClient.getTestCases(
+                                        request.getQuestionId(), "DEFAULT");
 
-                        return dbTestcases.stream()
+                        return apiTestcases.stream()
                                         .map(tc -> TestCaseInput.builder()
                                                         .input(tc.getInput())
                                                         .isCustom(false)
@@ -213,7 +214,7 @@ public class UnifiedExecutionService {
          * Build code bundle for execution.
          */
         private CodeBundle buildCodeBundle(String runId, RunRequestDto request,
-                        List<TestCaseInput> testcases, QuestionMetadata metadata) {
+                        List<TestCaseInput> testcases, QuestionMetadataApiDto metadata) {
                 // Convert metadata
                 List<CodeBundle.Parameter> params = new ArrayList<>();
                 List<String> paramNames = metadata.getParamNames();
@@ -282,7 +283,7 @@ public class UnifiedExecutionService {
          * pipeline.
          */
         private RunResponseDto buildRunResponse(BatchExecutionResult userResult,
-                        BatchExecutionResult oracleResult, QuestionMetadata metadata) {
+                        BatchExecutionResult oracleResult, QuestionMetadataApiDto metadata) {
                 List<TestCaseOutput> userOutputs = userResult.getOutputs();
                 List<TestCaseOutput> oracleOutputs = oracleResult.getOutputs();
 
@@ -292,7 +293,7 @@ public class UnifiedExecutionService {
                 System.out.println("[buildRunResponse] User outputs count: " + userOutputs.size());
                 System.out.println("[buildRunResponse] Oracle outputs count: " + oracleOutputs.size());
 
-                // Build judging context from metadata (once per question)
+                // Build judging context from metadata DTO
                 JudgingContext judgingContext = buildJudgingContext(metadata);
                 System.out.println("[buildRunResponse] JudgingContext: returnType=" + judgingContext.getReturnType()
                                 + ", nodeType=" + judgingContext.getNodeType()
@@ -316,7 +317,6 @@ public class UnifiedExecutionService {
                                                         + (oracleOutput != null ? oracleOutput.getOutput() : null)
                                                         + "\"");
 
-                        // Build ExecutionOutput wrappers
                         ExecutionOutput userExecOutput = ExecutionOutput.builder()
                                         .rawOutput(userOutput.getOutput())
                                         .error(userOutput.getError())
@@ -328,7 +328,6 @@ public class UnifiedExecutionService {
                                         .error(oracleOutput != null ? oracleOutput.getError() : null)
                                         .build();
 
-                        // Judge via pipeline
                         JudgingResult result = pipeline.judge(userExecOutput, oracleExecOutput, judgingContext);
                         System.out.println("    pipeline.judge(): passed=" + result.isPassed()
                                         + (result.getFailureReason() != null ? ", reason=" + result.getFailureReason()
@@ -369,20 +368,26 @@ public class UnifiedExecutionService {
         }
 
         /**
-         * Build JudgingContext from question metadata.
-         * Phase 4: Includes validationHints parsed from Question entity.
+         * Build JudgingContext from question metadata API DTO.
+         * Reads fields directly from DTO instead of navigating JPA relationships.
          */
-        private JudgingContext buildJudgingContext(QuestionMetadata metadata) {
-                Question question = metadata.getQuestion();
-
-                // Parse comma-separated validationHints into List
+        private JudgingContext buildJudgingContext(QuestionMetadataApiDto metadata) {
+                // Parse comma-separated validationHints
                 java.util.List<String> hints = null;
-                if (question != null && question.getValidationHints() != null
-                                && !question.getValidationHints().isBlank()) {
-                        hints = java.util.Arrays.stream(question.getValidationHints().split(","))
+                if (metadata.getValidationHints() != null && !metadata.getValidationHints().isBlank()) {
+                        hints = java.util.Arrays.stream(metadata.getValidationHints().split(","))
                                         .map(String::trim)
                                         .filter(s -> !s.isEmpty())
                                         .toList();
+                }
+
+                // Parse nodeType from String to enum
+                NodeType nodeType = null;
+                if (metadata.getNodeType() != null && !metadata.getNodeType().isBlank()) {
+                        try {
+                                nodeType = NodeType.valueOf(metadata.getNodeType());
+                        } catch (IllegalArgumentException ignored) {
+                        }
                 }
 
                 // Resolve effective output type for normalizer/comparator routing.
@@ -391,9 +396,9 @@ public class UnifiedExecutionService {
                 return JudgingContext.builder()
                                 .returnType(metadata.getReturnType())
                                 .executionStrategy(metadata.getExecutionStrategy())
-                                .questionId(question != null ? question.getId() : null)
-                                .nodeType(question != null ? question.getNodeType() : null)
-                                .isOutputOrderMatters(question != null ? question.getIsOutputOrderMatters() : null)
+                                .questionId(metadata.getQuestionId())
+                                .nodeType(nodeType)
+                                .isOutputOrderMatters(metadata.getIsOutputOrderMatters())
                                 .validationHints(hints)
                                 .mutationTarget(metadata.getMutationTarget())
                                 .serializationStrategy(metadata.getSerializationStrategy())
@@ -405,18 +410,16 @@ public class UnifiedExecutionService {
         /**
          * Resolve the effective output type for normalizer/comparator routing.
          */
-        private String resolveEffectiveOutputType(QuestionMetadata metadata) {
+        private String resolveEffectiveOutputType(QuestionMetadataApiDto metadata) {
                 String returnType = metadata.getReturnType();
                 if (returnType != null && !"void".equalsIgnoreCase(returnType)) {
                         return returnType;
                 }
 
                 // Void return — resolve from mutation target's param type.
-                // mutationTarget is a 0-based parameter INDEX (e.g., "0").
                 java.util.List<String> paramTypes = metadata.getParamTypes();
                 String target = metadata.getMutationTarget();
 
-                // Strategy 1: explicit mutationTarget index → look up param type by index
                 if (target != null && !target.isBlank() && paramTypes != null) {
                         try {
                                 int idx = Integer.parseInt(target.trim());
@@ -424,16 +427,13 @@ public class UnifiedExecutionService {
                                         return paramTypes.get(idx);
                                 }
                         } catch (NumberFormatException ignored) {
-                                // Not numeric — fall through to Strategy 2
                         }
                 }
 
-                // Strategy 2: no explicit mutationTarget — single param is the target
                 if (paramTypes != null && paramTypes.size() == 1) {
                         return paramTypes.get(0);
                 }
 
-                // Fallback: void with no resolution
                 return returnType;
         }
 }

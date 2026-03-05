@@ -1,14 +1,15 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.adapter.ExecutionAdapter;
+import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
+import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.judging.*;
-import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
 import com.hrishabh.algocracksubmissionservice.repository.QuestionStatisticsRepository;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
-import com.hrishabh.algocracksubmissionservice.repository.TestcaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -41,8 +42,7 @@ public class SubmissionProcessingService {
     private final PipelineAssembler pipelineAssembler;
     private final SubmissionRepository submissionRepository;
     private final QuestionStatisticsRepository statsRepository;
-    private final QuestionMetadataRepository metadataRepository;
-    private final TestcaseRepository testcaseRepository;
+    private final ProblemServiceClient problemServiceClient;
     private final WebSocketService webSocketService;
     private final OracleExecutionService oracleExecutionService;
     private final ObjectMapper objectMapper;
@@ -69,15 +69,17 @@ public class SubmissionProcessingService {
             submission = submissionRepository.save(submission);
             webSocketService.sendStatus(submission);
 
-            // 2. Fetch question metadata and test cases
+            // 2. Fetch question metadata and test cases via ProblemService API
             Long questionId = submission.getQuestionId();
-            Language language = Language.valueOf(submission.getLanguage().toUpperCase());
-            QuestionMetadata metadata = metadataRepository.findByQuestionIdAndLanguageWithQuestion(questionId, language)
-                    .orElseThrow(() -> new RuntimeException(
-                            "Question metadata not found for questionId: " + questionId + ", language: " + language));
+            QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(
+                    questionId, submission.getLanguage().toUpperCase());
+            if (metadata == null) {
+                throw new RuntimeException(
+                        "Question metadata not found for questionId: " + questionId + ", language: " + submission.getLanguage());
+            }
 
-            // Fetch HIDDEN testcases only for SUBMIT mode
-            List<TestCase> testCases = testcaseRepository.findByQuestionIdAndType(questionId, TestCaseType.HIDDEN);
+            // Fetch HIDDEN testcases via ProblemService API
+            List<TestCaseDto> testCases = problemServiceClient.getTestCases(questionId, "HIDDEN");
 
             // 3. Build CodeBundle and execute via adapter (same pipeline as RUN and ORACLE)
             List<TestCaseInput> testCaseInputs = testCases.stream()
@@ -141,7 +143,7 @@ public class SubmissionProcessingService {
      * Same pipeline as the RUN path — no divergent judging systems.
      */
     private SubmissionVerdict judgeViaPipeline(BatchExecutionResult userResult,
-            BatchExecutionResult oracleResult, QuestionMetadata metadata) {
+            BatchExecutionResult oracleResult, QuestionMetadataApiDto metadata) {
         List<TestCaseOutput> userOutputs = userResult.getOutputs();
         List<TestCaseOutput> oracleOutputs = oracleResult.getOutputs();
 
@@ -248,30 +250,30 @@ public class SubmissionProcessingService {
      * Build JudgingContext from question metadata.
      * Identical logic to UnifiedExecutionService.buildJudgingContext().
      */
-    private JudgingContext buildJudgingContext(QuestionMetadata metadata) {
-        Question question = metadata.getQuestion();
-
-        // Parse comma-separated validationHints into List
+    private JudgingContext buildJudgingContext(QuestionMetadataApiDto metadata) {
+        // Parse comma-separated validationHints
         List<String> hints = null;
-        if (question != null && question.getValidationHints() != null
-                && !question.getValidationHints().isBlank()) {
-            hints = java.util.Arrays.stream(question.getValidationHints().split(","))
+        if (metadata.getValidationHints() != null && !metadata.getValidationHints().isBlank()) {
+            hints = java.util.Arrays.stream(metadata.getValidationHints().split(","))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
                     .toList();
         }
 
-        // Resolve effective output type for normalizer/comparator routing.
-        // For void-return functions with mutation target, the actual serialized
-        // output is the mutation target's parameter type, not "void".
+        // Parse nodeType from String to enum
+        NodeType nodeType = null;
+        if (metadata.getNodeType() != null && !metadata.getNodeType().isBlank()) {
+            try { nodeType = NodeType.valueOf(metadata.getNodeType()); } catch (IllegalArgumentException ignored) {}
+        }
+
         String effectiveOutputType = resolveEffectiveOutputType(metadata);
 
         return JudgingContext.builder()
                 .returnType(metadata.getReturnType())
                 .executionStrategy(metadata.getExecutionStrategy())
-                .questionId(question != null ? question.getId() : null)
-                .nodeType(question != null ? question.getNodeType() : null)
-                .isOutputOrderMatters(question != null ? question.getIsOutputOrderMatters() : null)
+                .questionId(metadata.getQuestionId())
+                .nodeType(nodeType)
+                .isOutputOrderMatters(metadata.getIsOutputOrderMatters())
                 .validationHints(hints)
                 .mutationTarget(metadata.getMutationTarget())
                 .serializationStrategy(metadata.getSerializationStrategy())
@@ -285,42 +287,27 @@ public class SubmissionProcessingService {
      * For void-return functions with a mutation target, the actual serialized
      * output is the mutation target's parameter type (e.g., char[][] for Sudoku).
      */
-    private String resolveEffectiveOutputType(QuestionMetadata metadata) {
+    private String resolveEffectiveOutputType(QuestionMetadataApiDto metadata) {
         String returnType = metadata.getReturnType();
         if (returnType != null && !"void".equalsIgnoreCase(returnType)) {
             return returnType;
         }
-
-        // Void return — resolve from mutation target's param type.
-        // mutationTarget is a 0-based parameter INDEX (e.g., "0").
         List<String> paramTypes = metadata.getParamTypes();
         String target = metadata.getMutationTarget();
-
-        // Strategy 1: explicit mutationTarget index → look up param type by index
         if (target != null && !target.isBlank() && paramTypes != null) {
             try {
                 int idx = Integer.parseInt(target.trim());
-                if (idx >= 0 && idx < paramTypes.size()) {
-                    return paramTypes.get(idx);
-                }
-            } catch (NumberFormatException ignored) {
-                // Not numeric — fall through to Strategy 2
-            }
+                if (idx >= 0 && idx < paramTypes.size()) { return paramTypes.get(idx); }
+            } catch (NumberFormatException ignored) {}
         }
-
-        // Strategy 2: no explicit mutationTarget — single param is the target
-        if (paramTypes != null && paramTypes.size() == 1) {
-            return paramTypes.get(0);
-        }
-
-        // Fallback: void with no resolution
+        if (paramTypes != null && paramTypes.size() == 1) { return paramTypes.get(0); }
         return returnType;
     }
 
     /**
      * Build CodeBundle for user submission execution.
      */
-    private CodeBundle buildCodeBundle(Submission submission, QuestionMetadata metadata,
+    private CodeBundle buildCodeBundle(Submission submission, QuestionMetadataApiDto metadata,
             List<TestCaseInput> testcases) {
         List<CodeBundle.Parameter> params = new ArrayList<>();
         List<String> paramNames = metadata.getParamNames();

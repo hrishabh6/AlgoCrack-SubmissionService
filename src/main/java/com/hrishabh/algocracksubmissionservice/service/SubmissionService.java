@@ -1,10 +1,9 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
+import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
-import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
-import com.hrishabh.algocracksubmissionservice.repository.TestcaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -28,8 +27,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SubmissionService {
     private final SubmissionRepository submissionRepository;
-    private final QuestionMetadataRepository questionMetadataRepository;
-    private final TestcaseRepository testcaseRepository;
+    private final ProblemServiceClient problemServiceClient;
     private final SubmissionProcessingService processingService;
 
     /**
@@ -96,16 +94,16 @@ public class SubmissionService {
     }
 
     /**
-     * Get question metadata for execution request.
+     * Get question metadata for execution request via ProblemService API.
      */
-    public Optional<QuestionMetadata> getQuestionMetadata(Long questionId, Language language) {
-        return questionMetadataRepository.findByQuestionIdAndLanguage(questionId, language);
+    public QuestionMetadataApiDto getQuestionMetadata(Long questionId, String language) {
+        return problemServiceClient.getMetadata(questionId, language);
     }
 
     /**
-     * Get test cases for a question.
+     * Get test cases for a question via ProblemService API.
      */
-    public List<TestCase> getTestCases(Long questionId) {
-        return testcaseRepository.findByQuestionId(questionId);
+    public List<TestCaseDto> getTestCases(Long questionId) {
+        return problemServiceClient.getTestCases(questionId, null);
     }
 }
