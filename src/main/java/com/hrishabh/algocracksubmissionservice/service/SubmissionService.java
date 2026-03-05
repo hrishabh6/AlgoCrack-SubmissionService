@@ -11,9 +11,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import jakarta.persistence.EntityManager;
-import com.hrishabh.algocracksubmissionservice.repository.UserRepository;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -34,8 +31,6 @@ public class SubmissionService {
     private final QuestionMetadataRepository questionMetadataRepository;
     private final TestcaseRepository testcaseRepository;
     private final SubmissionProcessingService processingService;
-    private final UserRepository userRepository;
-    private final EntityManager entityManager;
 
     /**
      * Create a new submission and trigger async processing.
@@ -45,15 +40,11 @@ public class SubmissionService {
         log.info("Creating submission for user {} question {}", request.getUserId(), request.getQuestionId());
         // Generate UUID for external reference
         String submissionId = UUID.randomUUID().toString();
-        // Get user and question references
-        User user = userRepository.findByUserId(request.getUserId())
-                .orElseThrow(() -> new RuntimeException("User not found: " + request.getUserId()));
-        Question question = entityManager.getReference(Question.class, request.getQuestionId());
-        // Create submission entity
+        // Create submission entity with scalar references (no JPA entity lookup needed)
         Submission submission = Submission.builder()
                 .submissionId(submissionId)
-                .user(user)
-                .question(question)
+                .userId(request.getUserId())
+                .questionId(request.getQuestionId())
                 .language(request.getLanguage())
                 .code(request.getCode())
                 .status(SubmissionStatus.QUEUED)
@@ -92,10 +83,10 @@ public class SubmissionService {
     public List<SubmissionDetailDto> getUserSubmissions(String userId, Long questionId, int page, int size) {
         Page<Submission> submissions;
         if (questionId != null) {
-            submissions = submissionRepository.findByUser_UserIdAndQuestionIdOrderByQueuedAtDesc(userId, questionId,
+            submissions = submissionRepository.findByUserIdAndQuestionIdOrderByQueuedAtDesc(userId, questionId,
                     PageRequest.of(page, size));
         } else {
-            submissions = submissionRepository.findByUser_UserIdOrderByQueuedAtDesc(userId, PageRequest.of(page, size));
+            submissions = submissionRepository.findByUserIdOrderByQueuedAtDesc(userId, PageRequest.of(page, size));
         }
 
         return submissions.getContent()

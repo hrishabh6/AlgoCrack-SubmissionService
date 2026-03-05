@@ -24,7 +24,7 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
         /**
          * Get user's submissions ordered by most recent.
          */
-        Page<Submission> findByUser_UserIdOrderByQueuedAtDesc(String userId, Pageable pageable);
+        Page<Submission> findByUserIdOrderByQueuedAtDesc(String userId, Pageable pageable);
 
         /**
          * Get user's submissions for a specific question.
@@ -32,7 +32,7 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
         /**
          * Get user's submissions for a specific question with pagination.
          */
-        Page<Submission> findByUser_UserIdAndQuestionIdOrderByQueuedAtDesc(String userId, Long questionId,
+        Page<Submission> findByUserIdAndQuestionIdOrderByQueuedAtDesc(String userId, Long questionId,
                         Pageable pageable);
 
         /**

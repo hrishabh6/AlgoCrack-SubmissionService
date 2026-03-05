@@ -70,7 +70,7 @@ public class SubmissionProcessingService {
             webSocketService.sendStatus(submission);
 
             // 2. Fetch question metadata and test cases
-            Long questionId = submission.getQuestion().getId();
+            Long questionId = submission.getQuestionId();
             Language language = Language.valueOf(submission.getLanguage().toUpperCase());
             QuestionMetadata metadata = metadataRepository.findByQuestionIdAndLanguageWithQuestion(questionId, language)
                     .orElseThrow(() -> new RuntimeException(
@@ -333,7 +333,7 @@ public class SubmissionProcessingService {
         }
 
         CodeBundle.QuestionMetadataBundle metaBundle = CodeBundle.QuestionMetadataBundle.builder()
-                .fullyQualifiedPackageName("com.algocrack.solution.q" + submission.getQuestion().getId())
+                .fullyQualifiedPackageName("com.algocrack.solution.q" + submission.getQuestionId())
                 .functionName(metadata.getFunctionName())
                 .returnType(metadata.getReturnType())
                 .parameters(params)
@@ -347,8 +347,8 @@ public class SubmissionProcessingService {
                 .executionId(submission.getSubmissionId())
                 .code(submission.getCode())
                 .language(Language.valueOf(submission.getLanguage().toUpperCase()))
-                .questionId(submission.getQuestion().getId())
-                .userId(submission.getUser().getUserId())
+                .questionId(submission.getQuestionId())
+                .userId(submission.getUserId())
                 .testcases(testcases)
                 .metadata(metaBundle)
                 .intent(ExecutionIntent.SUBMIT)
@@ -387,7 +387,7 @@ public class SubmissionProcessingService {
      */
     @Transactional
     public void updateQuestionStatistics(Submission submission) {
-        Long questionId = submission.getQuestion().getId();
+        Long questionId = submission.getQuestionId();
 
         QuestionStatistics stats = statsRepository.findByQuestionId(questionId)
                 .orElseGet(() -> QuestionStatistics.builder()

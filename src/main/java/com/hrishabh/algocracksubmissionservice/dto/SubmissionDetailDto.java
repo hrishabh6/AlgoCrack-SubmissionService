@@ -48,8 +48,8 @@ public class SubmissionDetailDto {
 
         return SubmissionDetailDto.builder()
                 .submissionId(submission.getSubmissionId())
-                .userId(submission.getUser() != null ? submission.getUser().getUserId() : null)
-                .questionId(submission.getQuestion() != null ? submission.getQuestion().getId() : null)
+                .userId(submission.getUserId())
+                .questionId(submission.getQuestionId())
                 .language(submission.getLanguage())
                 .code(submission.getCode())
                 .status(submission.getStatus() != null ? submission.getStatus().name() : null)
