@@ -41,8 +41,8 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     
-    // Entity Service from JitPack (updated version with new entities)
-    implementation 'com.hrishabh:AlgoCrack-EntityService:0.1.4-SNAPSHOT'
+
+
 }
 
 tasks.named('test') {
