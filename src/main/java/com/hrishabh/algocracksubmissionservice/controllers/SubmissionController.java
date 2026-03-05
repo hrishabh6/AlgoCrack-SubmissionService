@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.controllers;
 
-import com.hrishabh.algocrackentityservice.models.Submission;
+import com.hrishabh.algocracksubmissionservice.models.Submission;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.hrishabh.algocracksubmissionservice.exception.TooManyRequestsException;
 import com.hrishabh.algocracksubmissionservice.exception.ValidationException;

@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 @SpringBootApplication
-@EntityScan("com.hrishabh.algocrackentityservice.models")
+@EntityScan("com.hrishabh.algocracksubmissionservice.models")
 @EnableJpaRepositories("com.hrishabh.algocracksubmissionservice.repository")
 @EnableJpaAuditing
 @EnableAsync

@@ -1,7 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
-import com.hrishabh.algocrackentityservice.models.Language;
-import com.hrishabh.algocrackentityservice.models.QuestionMetadata;
+import com.hrishabh.algocracksubmissionservice.models.Language;
+import com.hrishabh.algocracksubmissionservice.models.QuestionMetadata;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;

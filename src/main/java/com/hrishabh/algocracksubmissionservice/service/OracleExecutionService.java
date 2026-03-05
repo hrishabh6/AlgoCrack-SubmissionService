@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
-import com.hrishabh.algocrackentityservice.models.ReferenceSolution;
+import com.hrishabh.algocracksubmissionservice.models.ReferenceSolution;
 import com.hrishabh.algocracksubmissionservice.adapter.ExecutionAdapter;
 import com.hrishabh.algocracksubmissionservice.dto.internal.BatchExecutionResult;
 import com.hrishabh.algocracksubmissionservice.dto.internal.CodeBundle;

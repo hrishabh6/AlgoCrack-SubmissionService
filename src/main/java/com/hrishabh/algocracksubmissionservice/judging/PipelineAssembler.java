@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.judging;
 
-import com.hrishabh.algocrackentityservice.models.NodeType;
+import com.hrishabh.algocracksubmissionservice.models.NodeType;
 import com.hrishabh.algocracksubmissionservice.judging.comparator.ExactMatchComparator;
 import com.hrishabh.algocracksubmissionservice.judging.comparator.JsonDeepComparator;
 import com.hrishabh.algocracksubmissionservice.judging.comparator.OutputComparator;

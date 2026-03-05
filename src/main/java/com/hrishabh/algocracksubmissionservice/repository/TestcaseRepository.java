@@ -1,7 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.repository;
 
-import com.hrishabh.algocrackentityservice.models.TestCase;
-import com.hrishabh.algocrackentityservice.models.TestCaseType;
+import com.hrishabh.algocracksubmissionservice.models.TestCase;
+import com.hrishabh.algocracksubmissionservice.models.TestCaseType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 

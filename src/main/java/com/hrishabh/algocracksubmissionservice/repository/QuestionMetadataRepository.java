@@ -1,7 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.repository;
 
-import com.hrishabh.algocrackentityservice.models.Language;
-import com.hrishabh.algocrackentityservice.models.QuestionMetadata;
+import com.hrishabh.algocracksubmissionservice.models.Language;
+import com.hrishabh.algocracksubmissionservice.models.QuestionMetadata;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

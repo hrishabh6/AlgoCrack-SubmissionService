@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.dto.internal;
 
-import com.hrishabh.algocrackentityservice.models.Language;
+import com.hrishabh.algocracksubmissionservice.models.Language;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.repository;
 
-import com.hrishabh.algocrackentityservice.models.QuestionStatistics;
+import com.hrishabh.algocracksubmissionservice.models.QuestionStatistics;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;

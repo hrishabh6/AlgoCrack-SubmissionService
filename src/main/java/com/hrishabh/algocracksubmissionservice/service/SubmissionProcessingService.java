@@ -1,7 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hrishabh.algocrackentityservice.models.*;
+import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.adapter.ExecutionAdapter;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.judging.*;

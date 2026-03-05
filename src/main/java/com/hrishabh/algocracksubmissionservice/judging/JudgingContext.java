@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.judging;
 
-import com.hrishabh.algocrackentityservice.models.NodeType;
+import com.hrishabh.algocracksubmissionservice.models.NodeType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

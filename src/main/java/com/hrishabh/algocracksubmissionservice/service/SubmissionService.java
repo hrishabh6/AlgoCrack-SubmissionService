@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
-import com.hrishabh.algocrackentityservice.models.*;
+import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import com.hrishabh.algocracksubmissionservice.repository.QuestionMetadataRepository;

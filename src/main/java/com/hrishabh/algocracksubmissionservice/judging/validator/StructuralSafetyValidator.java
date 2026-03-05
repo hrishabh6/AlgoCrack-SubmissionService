@@ -2,7 +2,7 @@ package com.hrishabh.algocracksubmissionservice.judging.validator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hrishabh.algocrackentityservice.models.NodeType;
+import com.hrishabh.algocracksubmissionservice.models.NodeType;
 import com.hrishabh.algocracksubmissionservice.judging.JudgingContext;
 import com.hrishabh.algocracksubmissionservice.judging.util.ListTraversalUtil;
 import com.hrishabh.algocracksubmissionservice.judging.util.TreeTraversalUtil;

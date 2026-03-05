@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
-import com.hrishabh.algocrackentityservice.models.*;
+import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.adapter.ExecutionAdapter;
 import com.hrishabh.algocracksubmissionservice.dto.RunRequestDto;
 import com.hrishabh.algocracksubmissionservice.dto.RunResponseDto;

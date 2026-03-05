@@ -2,7 +2,7 @@ package com.hrishabh.algocracksubmissionservice.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hrishabh.algocrackentityservice.models.Submission;
+import com.hrishabh.algocracksubmissionservice.models.Submission;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;

@@ -1,7 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.repository;
 
-import com.hrishabh.algocrackentityservice.models.Submission;
-import com.hrishabh.algocrackentityservice.models.SubmissionStatus;
+import com.hrishabh.algocracksubmissionservice.models.Submission;
+import com.hrishabh.algocracksubmissionservice.models.SubmissionStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;

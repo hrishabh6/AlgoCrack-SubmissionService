@@ -1,6 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.repository;
 
-import com.hrishabh.algocrackentityservice.models.ReferenceSolution;
+import com.hrishabh.algocracksubmissionservice.models.ReferenceSolution;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;

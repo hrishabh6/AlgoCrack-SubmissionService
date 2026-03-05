@@ -2,7 +2,7 @@ package com.hrishabh.algocracksubmissionservice.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hrishabh.algocrackentityservice.models.SubmissionVerdict;
+import com.hrishabh.algocracksubmissionservice.models.SubmissionVerdict;
 import com.hrishabh.algocracksubmissionservice.dto.internal.BatchExecutionResult;
 import com.hrishabh.algocracksubmissionservice.dto.internal.TestCaseOutput;
 import lombok.RequiredArgsConstructor;
