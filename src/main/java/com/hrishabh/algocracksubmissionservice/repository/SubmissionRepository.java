@@ -39,4 +39,28 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
          * Get all pending submissions.
          */
         List<Submission> findByStatusInOrderByQueuedAtAsc(List<SubmissionStatus> statuses);
+
+        // ── Inter-Service Query Methods (Phase 7) ──────────────────────────
+
+        /**
+         * Count distinct solved questions by user and difficulty.
+         */
+        @Query("SELECT COUNT(DISTINCT s.questionId) FROM Submission s WHERE s.userId = :userId AND s.difficultyLevel = :difficulty AND s.status = 'COMPLETED' AND s.verdict = 'ACCEPTED'")
+        long countDistinctSolvedByUserIdAndDifficulty(@Param("userId") String userId,
+                        @Param("difficulty") String difficulty);
+
+        /**
+         * Count distinct solved questions grouped by language.
+         */
+        @Query("SELECT s.language, COUNT(DISTINCT s.questionId) FROM Submission s WHERE s.userId = :userId AND s.status = 'COMPLETED' AND s.verdict = 'ACCEPTED' GROUP BY s.language")
+        List<Object[]> countDistinctSolvedByUserIdGroupByLanguage(@Param("userId") String userId);
+
+        /**
+         * Count submissions grouped by date for heatmap.
+         */
+        @Query("SELECT FUNCTION('DATE', s.queuedAt), COUNT(s) FROM Submission s WHERE s.userId = :userId AND s.queuedAt >= :from AND s.queuedAt < :to GROUP BY FUNCTION('DATE', s.queuedAt) ORDER BY FUNCTION('DATE', s.queuedAt) ASC")
+        List<Object[]> countSubmissionsGroupedByDateBetween(
+                        @Param("userId") String userId,
+                        @Param("from") java.time.LocalDateTime from,
+                        @Param("to") java.time.LocalDateTime to);
 }

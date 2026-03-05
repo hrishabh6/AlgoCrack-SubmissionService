@@ -4,6 +4,7 @@ import com.hrishabh.algocracksubmissionservice.models.Submission;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.hrishabh.algocracksubmissionservice.exception.TooManyRequestsException;
 import com.hrishabh.algocracksubmissionservice.exception.ValidationException;
+import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import com.hrishabh.algocracksubmissionservice.service.CustomExecutionService;
 import com.hrishabh.algocracksubmissionservice.service.SubmissionService;
 import com.hrishabh.algocracksubmissionservice.service.UnifiedExecutionService;
@@ -28,6 +29,7 @@ public class SubmissionController {
     private final SubmissionService submissionService;
     private final CustomExecutionService customExecutionService;
     private final UnifiedExecutionService unifiedExecutionService;
+    private final SubmissionRepository submissionRepository;
 
     /**
      * Submit code for official judging (async).
@@ -188,6 +190,66 @@ public class SubmissionController {
             return xForwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    // ── Inter-Service APIs (Phase 7) ──────────────────────────────────
+
+    /**
+     * Get user submission statistics (solved counts by difficulty and language).
+     * Called by ProblemService's UserProfileService.
+     */
+    @GetMapping("/stats/{userId}")
+    public ResponseEntity<UserSubmissionStatsDto> getUserStats(@PathVariable String userId) {
+        long easy = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "EASY");
+        long medium = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "MEDIUM");
+        long hard = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "HARD");
+        long total = easy + medium + hard;
+
+        List<Object[]> langRows = submissionRepository.countDistinctSolvedByUserIdGroupByLanguage(userId);
+        List<UserSubmissionStatsDto.LanguageStat> languageStats = langRows.stream()
+                .map(row -> UserSubmissionStatsDto.LanguageStat.builder()
+                        .language((String) row[0])
+                        .count((Long) row[1])
+                        .build())
+                .collect(java.util.stream.Collectors.toList());
+
+        return ResponseEntity.ok(UserSubmissionStatsDto.builder()
+                .totalSolved(total)
+                .easySolved(easy)
+                .mediumSolved(medium)
+                .hardSolved(hard)
+                .languageStats(languageStats)
+                .build());
+    }
+
+    /**
+     * Get user submission heatmap data.
+     * Called by ProblemService's UserProfileService.
+     */
+    @GetMapping("/heatmap/{userId}")
+    public ResponseEntity<HeatmapDataDto> getHeatmap(
+            @PathVariable String userId,
+            @RequestParam String from,
+            @RequestParam String to) {
+        java.time.LocalDateTime fromDt = java.time.LocalDate.parse(from).atStartOfDay();
+        java.time.LocalDateTime toDt = java.time.LocalDate.parse(to).plusDays(1).atStartOfDay();
+
+        List<Object[]> rows = submissionRepository.countSubmissionsGroupedByDateBetween(userId, fromDt, toDt);
+
+        List<HeatmapDataDto.DayActivity> activity = rows.stream()
+                .map(row -> HeatmapDataDto.DayActivity.builder()
+                        .date(row[0].toString())
+                        .count((Long) row[1])
+                        .build())
+                .collect(java.util.stream.Collectors.toList());
+
+        long totalSubmissions = activity.stream().mapToLong(HeatmapDataDto.DayActivity::getCount).sum();
+
+        return ResponseEntity.ok(HeatmapDataDto.builder()
+                .activity(activity)
+                .totalSubmissions(totalSubmissions)
+                .totalActiveDays(activity.size())
+                .build());
     }
 
     // ================== Exception Handlers ==================

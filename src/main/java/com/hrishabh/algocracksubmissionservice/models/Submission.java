@@ -156,6 +156,13 @@ public class Submission {
     @Column(name = "question_id", nullable = false)
     private Long questionId;
 
+    /**
+     * Denormalized difficulty level (EASY, MEDIUM, HARD).
+     * Stored at submission time to avoid cross-service joins for stats queries.
+     */
+    @Column(name = "difficulty_level", length = 10)
+    private String difficultyLevel;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
