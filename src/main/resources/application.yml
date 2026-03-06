@@ -5,7 +5,7 @@ spring:
   application:
     name: AlgoCrack-SubmissionService
   datasource:
-    url: jdbc:mysql://localhost:3306/leetcode
+    url: jdbc:mysql://localhost:3306/submission_db
     username: root
     password: hrishabh@123
   jpa:
@@ -13,7 +13,10 @@ spring:
       ddl-auto: validate
     show-sql: true
   flyway:
+    enabled: true
     baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
 
 # Code Execution Service Configuration
 cxe:
@@ -35,4 +38,4 @@ logging:
 # Inter-service communication
 services:
   problem:
-    base-url: ${PROBLEM_SERVICE_URL:http://localhost:8080}
+    base-url: ${PROBLEM_SERVICE_URL:http://localhost:8084}
