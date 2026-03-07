@@ -45,9 +45,21 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
         /**
          * Count distinct solved questions by user and difficulty.
          */
-        @Query("SELECT COUNT(DISTINCT s.questionId) FROM Submission s WHERE s.userId = :userId AND s.difficultyLevel = :difficulty AND s.status = 'COMPLETED' AND s.verdict = 'ACCEPTED'")
+        @Query("SELECT COUNT(DISTINCT s.questionId) FROM Submission s WHERE s.userId = :userId AND UPPER(s.difficultyLevel) = UPPER(:difficulty) AND s.status = 'COMPLETED' AND s.verdict = 'ACCEPTED'")
         long countDistinctSolvedByUserIdAndDifficulty(@Param("userId") String userId,
                         @Param("difficulty") String difficulty);
+
+        /**
+         * Count total distinct solved questions by user, regardless of difficulty metadata.
+         */
+        @Query("SELECT COUNT(DISTINCT s.questionId) FROM Submission s WHERE s.userId = :userId AND s.status = 'COMPLETED' AND s.verdict = 'ACCEPTED'")
+        long countDistinctSolvedByUserId(@Param("userId") String userId);
+
+        /**
+         * Get distinct accepted question IDs solved by a user.
+         */
+        @Query("SELECT DISTINCT s.questionId FROM Submission s WHERE s.userId = :userId AND s.status = 'COMPLETED' AND s.verdict = 'ACCEPTED'")
+        List<Long> findDistinctSolvedQuestionIdsByUserId(@Param("userId") String userId);
 
         /**
          * Count distinct solved questions grouped by language.

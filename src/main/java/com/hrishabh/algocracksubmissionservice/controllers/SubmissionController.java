@@ -203,7 +203,7 @@ public class SubmissionController {
         long easy = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "EASY");
         long medium = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "MEDIUM");
         long hard = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "HARD");
-        long total = easy + medium + hard;
+        long total = submissionRepository.countDistinctSolvedByUserId(userId);
 
         List<Object[]> langRows = submissionRepository.countDistinctSolvedByUserIdGroupByLanguage(userId);
         List<UserSubmissionStatsDto.LanguageStat> languageStats = langRows.stream()
@@ -223,16 +223,41 @@ public class SubmissionController {
     }
 
     /**
+     * Get distinct accepted question IDs solved by user.
+     * Used by ProblemService to derive accurate difficulty distribution.
+     */
+    @GetMapping("/stats/{userId}/solved-question-ids")
+    public ResponseEntity<List<Long>> getSolvedQuestionIds(@PathVariable String userId) {
+        return ResponseEntity.ok(submissionRepository.findDistinctSolvedQuestionIdsByUserId(userId));
+    }
+
+    /**
      * Get user submission heatmap data.
      * Called by ProblemService's UserProfileService.
      */
     @GetMapping("/heatmap/{userId}")
     public ResponseEntity<HeatmapDataDto> getHeatmap(
             @PathVariable String userId,
-            @RequestParam String from,
-            @RequestParam String to) {
-        java.time.LocalDateTime fromDt = java.time.LocalDate.parse(from).atStartOfDay();
-        java.time.LocalDateTime toDt = java.time.LocalDate.parse(to).plusDays(1).atStartOfDay();
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        java.time.LocalDate fromDate;
+        java.time.LocalDate toDate;
+
+        if (from != null && to != null) {
+            fromDate = java.time.LocalDate.parse(from);
+            toDate = java.time.LocalDate.parse(to);
+        } else if (year != null) {
+            fromDate = java.time.LocalDate.of(year, 1, 1);
+            toDate = java.time.LocalDate.of(year, 12, 31);
+        } else {
+            int currentYear = java.time.LocalDate.now().getYear();
+            fromDate = java.time.LocalDate.of(currentYear, 1, 1);
+            toDate = java.time.LocalDate.of(currentYear, 12, 31);
+        }
+
+        java.time.LocalDateTime fromDt = fromDate.atStartOfDay();
+        java.time.LocalDateTime toDt = toDate.plusDays(1).atStartOfDay();
 
         List<Object[]> rows = submissionRepository.countSubmissionsGroupedByDateBetween(userId, fromDt, toDt);
 
@@ -246,6 +271,9 @@ public class SubmissionController {
         long totalSubmissions = activity.stream().mapToLong(HeatmapDataDto.DayActivity::getCount).sum();
 
         return ResponseEntity.ok(HeatmapDataDto.builder()
+                .year(year != null ? year : fromDate.getYear())
+                .from(fromDate.toString())
+                .to(toDate.toString())
                 .activity(activity)
                 .totalSubmissions(totalSubmissions)
                 .totalActiveDays(activity.size())
