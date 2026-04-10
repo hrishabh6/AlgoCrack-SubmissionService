@@ -1,27 +1,40 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
     name: AlgoCrack-SubmissionService
   datasource:
-    url: jdbc:mysql://localhost:3306/submission_db
-    username: root
-    password: hrishabh@123
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      initialization-fail-timeout: ${SPRING_DATASOURCE_HIKARI_INITIALIZATION_FAIL_TIMEOUT:0}
   jpa:
     hibernate:
       ddl-auto: validate
     show-sql: true
   flyway:
     enabled: true
+    connect-retries: ${SPRING_FLYWAY_CONNECT_RETRIES:10}
     baseline-on-migrate: true
     baseline-version: 1
     locations: classpath:db/migration
 
+# Actuator for health checks
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
 # Code Execution Service Configuration
 cxe:
   service:
-    url: http://localhost:8081
+    url: ${CXE_SERVICE_URL:http://code-execution-engine:8081}
     timeout-seconds: 30
 
 # Async Processing Configuration
@@ -38,4 +51,4 @@ logging:
 # Inter-service communication
 services:
   problem:
-    base-url: ${PROBLEM_SERVICE_URL:http://localhost:8084}
+    base-url: ${PROBLEM_SERVICE_URL:http://problem-service:8084}
