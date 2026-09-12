@@ -8,6 +8,8 @@ import com.hrishabh.algocracksubmissionservice.dto.internal.BatchExecutionResult
 import com.hrishabh.algocracksubmissionservice.dto.internal.CodeBundle;
 import com.hrishabh.algocracksubmissionservice.dto.internal.TestCaseInput;
 import com.hrishabh.algocracksubmissionservice.exception.OracleMissingException;
+import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OracleExecutionService {
 
+    private final StructuredLogger structuredLogger = new StructuredLogger(OracleExecutionService.class, "SubmissionService");
+
     private final ProblemServiceClient problemServiceClient;
     private final ExecutionAdapter executionAdapter;
 
@@ -42,39 +46,40 @@ public class OracleExecutionService {
      * @throws OracleMissingException if no oracle exists for the question
      */
     public BatchExecutionResult executeOracle(Long questionId, List<TestCaseInput> testcases) {
-        log.info("Executing oracle for question {} with {} testcases (batched)",
-                questionId, testcases.size());
-
-        System.out.println("\n" + "#".repeat(60));
-        System.out.println("[OracleExecutionService] executeOracle() CALLED");
-        System.out.println("#".repeat(60));
-        System.out.println("[OracleExecutionService] questionId: " + questionId);
-        System.out.println("[OracleExecutionService] testcases count: " + testcases.size());
+        structuredLogger.info("Oracle execution started",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "oracle_execute",
+                LoggingConstants.QUESTION_ID, questionId,
+                LoggingConstants.TESTCASE_COUNT, testcases.size());
 
         // 1. Fetch oracle via ProblemService API
         ReferenceSolutionDto oracle;
         try {
             oracle = problemServiceClient.getOracle(questionId);
         } catch (Exception e) {
+            structuredLogger.warn("Oracle fetch failed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Warn",
+                    LoggingConstants.OPERATION, "oracle_fetch",
+                    LoggingConstants.QUESTION_ID, questionId,
+                    LoggingConstants.ERROR_MESSAGE, e.getMessage());
             throw new OracleMissingException(questionId);
         }
         if (oracle == null || oracle.getSourceCode() == null) {
+            structuredLogger.warn("Oracle missing",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Warn",
+                    LoggingConstants.OPERATION, "oracle_fetch",
+                    LoggingConstants.QUESTION_ID, questionId);
             throw new OracleMissingException(questionId);
         }
 
-        System.out.println("[OracleExecutionService] Oracle Found:");
-        System.out.println("    language: " + oracle.getLanguage());
-        System.out.println(
-                "    sourceCode length: " + (oracle.getSourceCode() != null ? oracle.getSourceCode().length() : 0));
-        System.out.println("    sourceCode preview (first 300 chars):");
-        if (oracle.getSourceCode() != null) {
-            System.out.println("--- ORACLE CODE START ---");
-            System.out.println(oracle.getSourceCode().substring(0, Math.min(300, oracle.getSourceCode().length())));
-            if (oracle.getSourceCode().length() > 300) {
-                System.out.println("... [TRUNCATED]");
-            }
-            System.out.println("--- ORACLE CODE END ---");
-        }
+        structuredLogger.debug("Oracle found",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "oracle_fetch",
+                LoggingConstants.QUESTION_ID, questionId,
+                LoggingConstants.LANGUAGE, oracle.getLanguage(),
+                LoggingConstants.CODE_LENGTH, oracle.getSourceCode().length());
 
         // 2. Build code bundle for oracle execution
         String oracleExecutionId = "oracle-" + UUID.randomUUID().toString();
@@ -88,42 +93,41 @@ public class OracleExecutionService {
                 .testcases(testcases)
                 .build();
 
-        System.out.println("[OracleExecutionService] Oracle CodeBundle built:");
-        System.out.println("    executionId: " + oracleExecutionId);
-        System.out.println("    language: " + oracleBundle.getLanguage());
-
         // 3. Execute via adapter (single batch call)
-        System.out.println("\n[OracleExecutionService] Submitting oracle to ExecutionAdapter...");
-        log.debug("[{}] Submitting oracle to execution adapter", oracleExecutionId);
-        BatchExecutionResult result = executionAdapter.execute(oracleBundle);
+        structuredLogger.debug("Oracle bundle built",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "oracle_bundle_built",
+                LoggingConstants.EXECUTION_ID, oracleExecutionId,
+                LoggingConstants.QUESTION_ID, questionId,
+                LoggingConstants.LANGUAGE, oracleBundle.getLanguage(),
+                LoggingConstants.TESTCASE_COUNT, testcases.size());
 
-        System.out.println("[OracleExecutionService] Oracle Execution Result:");
-        System.out.println("    status: " + result.getStatus());
-        System.out.println("    isSuccess: " + result.isSuccess());
-        System.out.println("    outputs count: " + (result.getOutputs() != null ? result.getOutputs().size() : 0));
-        if (result.getOutputs() != null) {
-            for (int i = 0; i < result.getOutputs().size(); i++) {
-                System.out.println("    output[" + i + "]: " + result.getOutputs().get(i).getOutput());
-            }
-        }
-        if (result.getErrorMessage() != null) {
-            System.out.println("    errorMessage: " + result.getErrorMessage());
-        }
-        if (result.getCompilationOutput() != null) {
-            System.out.println("    compilationOutput: " + result.getCompilationOutput());
-        }
+        BatchExecutionResult result = executionAdapter.execute(oracleBundle);
 
         // 4. Validate oracle execution succeeded
         if (!result.isSuccess()) {
-            log.error("[{}] Oracle execution failed: {}", oracleExecutionId, result.getStatus());
-            System.out.println("[OracleExecutionService] ERROR: Oracle execution FAILED!");
+            structuredLogger.error("Oracle execution failed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Error",
+                    LoggingConstants.OPERATION, "oracle_execute",
+                    LoggingConstants.EXECUTION_ID, oracleExecutionId,
+                    LoggingConstants.QUESTION_ID, questionId,
+                    LoggingConstants.STATUS, result.getStatus(),
+                    "has_error", result.getErrorMessage() != null,
+                    "has_compilation_output", result.getCompilationOutput() != null);
             throw new RuntimeException("Oracle execution failed for question " + questionId +
                     ": " + result.getErrorMessage());
         }
 
-        log.info("[{}] Oracle execution completed successfully with {} outputs",
-                oracleExecutionId, result.getOutputs().size());
-        System.out.println("#".repeat(60) + "\n");
+        structuredLogger.info("Oracle execution completed",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "oracle_execute",
+                LoggingConstants.EXECUTION_ID, oracleExecutionId,
+                LoggingConstants.QUESTION_ID, questionId,
+                LoggingConstants.STATUS, result.getStatus(),
+                LoggingConstants.OUTPUT_COUNT, result.getOutputs() != null ? result.getOutputs().size() : 0,
+                LoggingConstants.RUNTIME_MS, result.getTotalRuntimeMs(),
+                LoggingConstants.MEMORY_KB, result.getPeakMemoryKb());
 
         return result;
     }

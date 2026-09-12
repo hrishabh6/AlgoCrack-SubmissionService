@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="AlgoCrack-SubmissionService"/>
+    <springProperty scope="context" name="env" source="spring.profiles.active" defaultValue="local"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${appName}","environment":"${env}","kube_micro":"SubmissionService"}</customFields>
+            <includeMdcKeyName>request_id</includeMdcKeyName>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <logger name="com.hrishabh.algocracksubmissionservice" level="${LOG_LEVEL_SUBMISSION_SERVICE:DEBUG}"/>
+</configuration>

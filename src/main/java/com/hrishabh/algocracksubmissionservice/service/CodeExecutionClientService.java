@@ -3,6 +3,8 @@ package com.hrishabh.algocracksubmissionservice.service;
 import com.hrishabh.algocracksubmissionservice.dto.ExecutionRequest;
 import com.hrishabh.algocracksubmissionservice.dto.ExecutionResponse;
 import com.hrishabh.algocracksubmissionservice.dto.SubmissionStatusDto;
+import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,9 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 @RequiredArgsConstructor
 public class CodeExecutionClientService {
 
+    private final StructuredLogger structuredLogger = new StructuredLogger(CodeExecutionClientService.class,
+            "SubmissionService");
+
     private final WebClient cxeWebClient;
 
     /**
@@ -24,7 +29,13 @@ public class CodeExecutionClientService {
      * Returns immediately with submission ID.
      */
     public ExecutionResponse submitCode(ExecutionRequest request) {
-        log.info("Submitting code to CXE for submission: {}", request.getSubmissionId());
+        structuredLogger.info("Submitting code to CXE",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXTERNAL_CALL,
+                LoggingConstants.OPERATION, "cxe_submit",
+                LoggingConstants.SUBMISSION_ID, request.getSubmissionId(),
+                LoggingConstants.USER_ID, request.getUserId(),
+                LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                LoggingConstants.LANGUAGE, request.getLanguage());
 
         try {
             return cxeWebClient.post()
@@ -34,7 +45,12 @@ public class CodeExecutionClientService {
                     .bodyToMono(ExecutionResponse.class)
                     .block();
         } catch (WebClientResponseException e) {
-            log.error("CXE submit failed: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            structuredLogger.error("CXE submit failed", e,
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Error",
+                    LoggingConstants.OPERATION, "cxe_submit",
+                    LoggingConstants.SUBMISSION_ID, request.getSubmissionId(),
+                    LoggingConstants.HTTP_STATUS, e.getStatusCode().value());
             throw new RuntimeException("Failed to submit to CXE: " + e.getMessage(), e);
         }
     }
@@ -43,7 +59,10 @@ public class CodeExecutionClientService {
      * Get current status of a submission from CXE.
      */
     public SubmissionStatusDto getStatus(String submissionId) {
-        log.debug("Polling CXE status for: {}", submissionId);
+        structuredLogger.debug("Polling CXE status",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXTERNAL_CALL,
+                LoggingConstants.OPERATION, "cxe_status",
+                LoggingConstants.SUBMISSION_ID, submissionId);
 
         try {
             return cxeWebClient.get()
@@ -52,7 +71,12 @@ public class CodeExecutionClientService {
                     .bodyToMono(SubmissionStatusDto.class)
                     .block();
         } catch (WebClientResponseException e) {
-            log.error("CXE status check failed for {}: {}", submissionId, e.getMessage());
+            structuredLogger.error("CXE status check failed", e,
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Error",
+                    LoggingConstants.OPERATION, "cxe_status",
+                    LoggingConstants.SUBMISSION_ID, submissionId,
+                    LoggingConstants.HTTP_STATUS, e.getStatusCode().value());
             throw new RuntimeException("Failed to get status from CXE: " + e.getMessage(), e);
         }
     }
@@ -61,7 +85,10 @@ public class CodeExecutionClientService {
      * Get full results of a completed submission from CXE.
      */
     public SubmissionStatusDto getResults(String submissionId) {
-        log.info("Getting full results from CXE for: {}", submissionId);
+        structuredLogger.info("Fetching CXE results",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXTERNAL_CALL,
+                LoggingConstants.OPERATION, "cxe_results",
+                LoggingConstants.SUBMISSION_ID, submissionId);
 
         try {
             return cxeWebClient.get()
@@ -70,7 +97,12 @@ public class CodeExecutionClientService {
                     .bodyToMono(SubmissionStatusDto.class)
                     .block();
         } catch (WebClientResponseException e) {
-            log.error("CXE results fetch failed for {}: {}", submissionId, e.getMessage());
+            structuredLogger.error("CXE results fetch failed", e,
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Error",
+                    LoggingConstants.OPERATION, "cxe_results",
+                    LoggingConstants.SUBMISSION_ID, submissionId,
+                    LoggingConstants.HTTP_STATUS, e.getStatusCode().value());
             throw new RuntimeException("Failed to get results from CXE: " + e.getMessage(), e);
         }
     }

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrishabh.algocracksubmissionservice.models.SubmissionVerdict;
 import com.hrishabh.algocracksubmissionservice.dto.internal.BatchExecutionResult;
 import com.hrishabh.algocracksubmissionservice.dto.internal.TestCaseOutput;
+import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,8 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class ResultValidationService {
+
+    private final StructuredLogger structuredLogger = new StructuredLogger(ResultValidationService.class, "SubmissionService");
 
     private final ObjectMapper objectMapper;
 
@@ -100,42 +104,51 @@ public class ResultValidationService {
      * Handles JSON comparison for complex types.
      */
     public boolean outputsMatch(String actual, String expected) {
-        System.out.println("[ResultValidationService] outputsMatch() called");
-        System.out.println("    actual (raw):   \"" + actual + "\"");
-        System.out.println("    expected (raw): \"" + expected + "\"");
-
         if (actual == null || expected == null) {
-            boolean result = actual == expected;
-            System.out.println("    Null check: result=" + result);
-            return result;
+            boolean matched = actual == expected;
+            structuredLogger.debug("Output comparison completed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                    LoggingConstants.OPERATION, "output_compare",
+                    "comparison_mode", "null_check",
+                    "matched", matched);
+            return matched;
         }
 
         // Normalize whitespace
         actual = actual.trim();
         expected = expected.trim();
-        System.out.println("    actual (trimmed):   \"" + actual + "\"");
-        System.out.println("    expected (trimmed): \"" + expected + "\"");
 
         // Direct string match
         if (actual.equals(expected)) {
-            System.out.println("    Direct string match: TRUE");
+            structuredLogger.debug("Output comparison completed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                    LoggingConstants.OPERATION, "output_compare",
+                    "comparison_mode", "string",
+                    "matched", true);
             return true;
         }
-        System.out.println("    Direct string match: FALSE, trying JSON comparison...");
 
         // Try JSON comparison for arrays/objects
         try {
             JsonNode actualNode = objectMapper.readTree(actual);
             JsonNode expectedNode = objectMapper.readTree(expected);
             boolean jsonMatch = actualNode.equals(expectedNode);
-            System.out.println("    JSON comparison result: " + jsonMatch);
+            structuredLogger.debug("Output comparison completed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                    LoggingConstants.OPERATION, "output_compare",
+                    "comparison_mode", "json",
+                    "matched", jsonMatch);
             return jsonMatch;
         } catch (Exception e) {
             // Not valid JSON, fall back to string comparison
-            log.debug("JSON parsing failed, using string comparison");
-            System.out.println("    JSON parse failed: " + e.getMessage());
-            System.out.println("    Falling back to string comparison: " + actual.equals(expected));
-            return actual.equals(expected);
+            boolean matched = actual.equals(expected);
+            structuredLogger.debug("Output comparison completed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                    LoggingConstants.OPERATION, "output_compare",
+                    "comparison_mode", "string_after_json_parse_failure",
+                    "matched", matched,
+                    "parse_error", e.getClass().getSimpleName());
+            return matched;
         }
     }
 

@@ -4,6 +4,8 @@ import com.hrishabh.algocracksubmissionservice.models.Submission;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.hrishabh.algocracksubmissionservice.exception.TooManyRequestsException;
 import com.hrishabh.algocracksubmissionservice.exception.ValidationException;
+import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import com.hrishabh.algocracksubmissionservice.service.CustomExecutionService;
 import com.hrishabh.algocracksubmissionservice.service.SubmissionService;
@@ -26,6 +28,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SubmissionController {
 
+    private final StructuredLogger structuredLogger = new StructuredLogger(SubmissionController.class, "SubmissionService");
+
     private final SubmissionService submissionService;
     private final CustomExecutionService customExecutionService;
     private final UnifiedExecutionService unifiedExecutionService;
@@ -40,14 +44,23 @@ public class SubmissionController {
      */
     @PostMapping
     public ResponseEntity<SubmissionResponseDto> submit(@RequestBody SubmissionRequestDto request) {
-        System.out.println("\n" + "=".repeat(80));
-        System.out.println("[CONTROLLER] /submit ENDPOINT - REQUEST RECEIVED");
-        System.out.println("[CONTROLLER] userId (raw): '" + request.getUserId() + "' (type: "
-                + (request.getUserId() != null ? request.getUserId().getClass().getSimpleName() : "null") + ")");
-        System.out.println("[CONTROLLER] questionId: " + request.getQuestionId());
-        System.out.println("[CONTROLLER] language: " + request.getLanguage());
-        System.out.println("=".repeat(80) + "\n");
+        structuredLogger.info("Submission request received",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.SUBMISSION,
+                LoggingConstants.OPERATION, "submit",
+                LoggingConstants.USER_ID, request.getUserId(),
+                LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                LoggingConstants.LANGUAGE, request.getLanguage(),
+                LoggingConstants.CODE_LENGTH, request.getCode() != null ? request.getCode().length() : 0);
+
         Submission submission = submissionService.createAndProcess(request);
+
+        structuredLogger.info("Submission queued",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.SUBMISSION,
+                LoggingConstants.OPERATION, "submit",
+                LoggingConstants.USER_ID, request.getUserId(),
+                LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                LoggingConstants.SUBMISSION_ID, submission.getSubmissionId(),
+                LoggingConstants.STATUS, submission.getStatus().name());
 
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(SubmissionResponseDto.builder()
@@ -75,70 +88,32 @@ public class SubmissionController {
 
         String clientIp = extractClientIp(httpRequest);
 
-        // ==================== DETAILED DEBUG LOGGING ====================
-        System.out.println("\n" + "=".repeat(80));
-        System.out.println("[CONTROLLER] /run ENDPOINT - REQUEST RECEIVED FROM FRONTEND");
-        System.out.println("=".repeat(80));
-        System.out.println("[CONTROLLER] Client IP: " + clientIp);
-        System.out.println("[CONTROLLER] Question ID: " + request.getQuestionId());
-        System.out.println("[CONTROLLER] Language: " + request.getLanguage());
-        System.out.println(
-                "[CONTROLLER] Code Length: " + (request.getCode() != null ? request.getCode().length() : 0) + " chars");
-        System.out.println("[CONTROLLER] Code Preview (first 500 chars):");
-        System.out.println("--- CODE START ---");
-        if (request.getCode() != null) {
-            System.out.println(request.getCode().substring(0, Math.min(500, request.getCode().length())));
-            if (request.getCode().length() > 500) {
-                System.out.println("... [TRUNCATED]");
-            }
-        }
-        System.out.println("--- CODE END ---");
-
-        if (request.getCustomTestCases() != null && !request.getCustomTestCases().isEmpty()) {
-            System.out.println("[CONTROLLER] Custom TestCases Count: " + request.getCustomTestCases().size());
-            for (int i = 0; i < request.getCustomTestCases().size(); i++) {
-                System.out.println(
-                        "[CONTROLLER] TestCase[" + i + "].input: " + request.getCustomTestCases().get(i).getInput());
-            }
-        } else {
-            System.out.println("[CONTROLLER] Custom TestCases: NONE (will use DEFAULT from DB)");
-        }
-        System.out.println("=".repeat(80) + "\n");
-        // ==================== END DEBUG LOGGING ====================
-
-        log.info("RUN request from IP: {} for question: {}", clientIp, request.getQuestionId());
+        structuredLogger.info("Run request received",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "run",
+                LoggingConstants.CLIENT_IP, clientIp,
+                LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                LoggingConstants.LANGUAGE, request.getLanguage(),
+                LoggingConstants.CODE_LENGTH, request.getCode() != null ? request.getCode().length() : 0,
+                LoggingConstants.TESTCASE_COUNT,
+                request.getCustomTestCases() != null ? request.getCustomTestCases().size() : 0,
+                "custom_testcases", request.getCustomTestCases() != null && !request.getCustomTestCases().isEmpty());
 
         RunResponseDto response = unifiedExecutionService.executeRun(request, clientIp);
 
-        // ==================== RESPONSE LOGGING ====================
-        System.out.println("\n" + "=".repeat(80));
-        System.out.println("[CONTROLLER] /run ENDPOINT - RESPONSE TO FRONTEND");
-        System.out.println("=".repeat(80));
-        System.out.println("[CONTROLLER] Verdict: " + response.getVerdict());
-        System.out.println("[CONTROLLER] Success: " + response.isSuccess());
-        System.out.println("[CONTROLLER] Runtime: " + response.getRuntimeMs() + "ms");
-        System.out.println("[CONTROLLER] Memory: " + response.getMemoryKb() + "KB");
-        if (response.getCompilationOutput() != null) {
-            System.out.println("[CONTROLLER] Compilation Output: " + response.getCompilationOutput());
-        }
-        if (response.getErrorMessage() != null) {
-            System.out.println("[CONTROLLER] Error Message: " + response.getErrorMessage());
-        }
-        if (response.getTestCaseResults() != null) {
-            System.out.println("[CONTROLLER] TestCase Results Count: " + response.getTestCaseResults().size());
-            for (var tc : response.getTestCaseResults()) {
-                System.out.println("[CONTROLLER] TestCase[" + tc.getIndex() + "]:");
-                System.out.println("    passed=" + tc.getPassed());
-                System.out.println("    actualOutput=" + tc.getActualOutput());
-                System.out.println("    expectedOutput=" + tc.getExpectedOutput());
-                System.out.println("    executionTimeMs=" + tc.getExecutionTimeMs());
-                if (tc.getError() != null) {
-                    System.out.println("    error=" + tc.getError());
-                }
-            }
-        }
-        System.out.println("=".repeat(80) + "\n");
-        // ==================== END RESPONSE LOGGING ====================
+        structuredLogger.info("Run response completed",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "run",
+                LoggingConstants.CLIENT_IP, clientIp,
+                LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                LoggingConstants.VERDICT, response.getVerdict(),
+                LoggingConstants.STATUS, response.isSuccess() ? "SUCCESS" : "FAILED",
+                LoggingConstants.RUNTIME_MS, response.getRuntimeMs(),
+                LoggingConstants.MEMORY_KB, response.getMemoryKb(),
+                LoggingConstants.TESTCASE_COUNT,
+                response.getTestCaseResults() != null ? response.getTestCaseResults().size() : 0,
+                "has_error", response.getErrorMessage() != null,
+                "has_compilation_output", response.getCompilationOutput() != null);
 
         return ResponseEntity.ok(response);
     }
@@ -284,13 +259,19 @@ public class SubmissionController {
 
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<String> handleRateLimitExceeded(TooManyRequestsException e) {
-        log.warn("Rate limit exceeded: {}", e.getMessage());
+        structuredLogger.warn("Rate limit exceeded",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                LoggingConstants.TYPE, "Warn",
+                LoggingConstants.ERROR_MESSAGE, e.getMessage());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(e.getMessage());
     }
 
     @ExceptionHandler(ValidationException.class)
     public ResponseEntity<String> handleValidationError(ValidationException e) {
-        log.warn("Validation failed: {}", e.getMessage());
+        structuredLogger.warn("Validation failed",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                LoggingConstants.TYPE, "Warn",
+                LoggingConstants.ERROR_MESSAGE, e.getMessage());
         return ResponseEntity.badRequest().body(e.getMessage());
     }
 }

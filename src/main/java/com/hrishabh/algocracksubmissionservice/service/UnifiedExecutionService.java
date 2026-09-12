@@ -10,6 +10,8 @@ import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.exception.OracleMissingException;
 import com.hrishabh.algocracksubmissionservice.judging.*;
+import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class UnifiedExecutionService {
 
+        private final StructuredLogger structuredLogger = new StructuredLogger(UnifiedExecutionService.class,
+                        "SubmissionService");
+
         private final ExecutionAdapter executionAdapter;
         private final OracleExecutionService oracleService;
         private final RunGuardService runGuard;
@@ -49,33 +54,45 @@ public class UnifiedExecutionService {
          */
         public RunResponseDto executeRun(RunRequestDto request, String clientIp) {
                 String runId = "run-" + UUID.randomUUID().toString();
-                log.info("[{}] Starting RUN for question {}", runId, request.getQuestionId());
-
-                System.out.println("\n" + "-".repeat(80));
-                System.out.println("[UnifiedExecutionService] executeRun() STARTED - runId: " + runId);
-                System.out.println("-".repeat(80));
+                structuredLogger.info("Run execution started",
+                                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                LoggingConstants.OPERATION, "run_execute",
+                                LoggingConstants.EXECUTION_ID, runId,
+                                LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                LoggingConstants.LANGUAGE, request.getLanguage(),
+                                LoggingConstants.CLIENT_IP, clientIp,
+                                LoggingConstants.CODE_LENGTH, request.getCode() != null ? request.getCode().length() : 0);
 
                 try {
                         // 1. Determine testcases: custom or DEFAULT
                         List<TestCaseInput> testcases = resolveTestcases(request);
 
-                        System.out.println("[UnifiedExecutionService] Step 1: Resolved TestCases");
-                        System.out.println("[UnifiedExecutionService] TestCase Count: " + testcases.size());
-                        for (int i = 0; i < testcases.size(); i++) {
-                                System.out.println("[UnifiedExecutionService] TestCase[" + i + "]:");
-                                System.out.println("    input: " + testcases.get(i).getInput());
-                                System.out.println("    isCustom: " + testcases.get(i).isCustom());
-                        }
+                        structuredLogger.debug("Run testcases resolved",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "resolve_testcases",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                        LoggingConstants.TESTCASE_COUNT, testcases.size(),
+                                        "custom_testcases", testcases.stream().anyMatch(TestCaseInput::isCustom));
 
                         // 2. Apply rate limiting and validation
                         runGuard.validateRunRequest(testcases, clientIp);
-                        System.out.println("[UnifiedExecutionService] Step 2: Rate limit validation PASSED");
+                        structuredLogger.debug("Run guard validation passed",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "run_guard",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.CLIENT_IP, clientIp,
+                                        LoggingConstants.TESTCASE_COUNT, testcases.size());
 
                         // 3. Validate oracle exists (fail fast before expensive compute)
                         if (!oracleService.hasOracle(request.getQuestionId())) {
                                 throw new OracleMissingException(request.getQuestionId());
                         }
-                        System.out.println("[UnifiedExecutionService] Step 3: Oracle validation PASSED");
+                        structuredLogger.debug("Oracle validation passed",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "oracle_validate",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId());
 
                         // 4. Fetch question metadata via ProblemService API
                         QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(
@@ -85,101 +102,95 @@ public class UnifiedExecutionService {
                                                 "Question metadata not found for language: " + request.getLanguage());
                         }
 
-                        System.out.println("[UnifiedExecutionService] Step 4: Question Metadata");
-                        System.out.println("    functionName: " + metadata.getFunctionName());
-                        System.out.println("    returnType: " + metadata.getReturnType());
-                        System.out.println("    paramNames: " + metadata.getParamNames());
-                        System.out.println("    paramTypes: " + metadata.getParamTypes());
+                        structuredLogger.debug("Question metadata fetched",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXTERNAL_CALL,
+                                        LoggingConstants.OPERATION, "metadata_fetch",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                        LoggingConstants.LANGUAGE, request.getLanguage(),
+                                        "function_name", metadata.getFunctionName(),
+                                        "return_type", metadata.getReturnType());
 
                         // 5. Build code bundle for user execution
                         CodeBundle userBundle = buildCodeBundle(runId, request, testcases, metadata);
 
-                        System.out.println("[UnifiedExecutionService] Step 5: User CodeBundle Built");
-                        System.out.println("    executionId: " + userBundle.getExecutionId());
-                        System.out.println("    language: " + userBundle.getLanguage());
-                        System.out.println("    questionId: " + userBundle.getQuestionId());
-                        System.out
-                                        .println("    code length: "
-                                                        + (userBundle.getCode() != null ? userBundle.getCode().length()
-                                                                        : 0));
-                        System.out.println("    testcases count: " + userBundle.getTestcases().size());
-                        System.out.println("    intent: " + userBundle.getIntent());
-                        System.out.println("    metadata.functionName: " + userBundle.getMetadata().getFunctionName());
+                        structuredLogger.debug("Run code bundle built",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "code_bundle_built",
+                                        LoggingConstants.EXECUTION_ID, userBundle.getExecutionId(),
+                                        LoggingConstants.QUESTION_ID, userBundle.getQuestionId(),
+                                        LoggingConstants.LANGUAGE, userBundle.getLanguage(),
+                                        LoggingConstants.CODE_LENGTH,
+                                        userBundle.getCode() != null ? userBundle.getCode().length() : 0,
+                                        LoggingConstants.TESTCASE_COUNT, userBundle.getTestcases().size(),
+                                        "intent", userBundle.getIntent());
 
                         // 6. Execute user code
-                        System.out.println(
-                                        "\n[UnifiedExecutionService] Step 6: EXECUTING USER CODE via ExecutionAdapter...");
-                        log.debug("[{}] Executing user code", runId);
                         BatchExecutionResult userResult = executionAdapter.execute(userBundle);
 
-                        System.out.println("[UnifiedExecutionService] User Execution RESULT:");
-                        System.out.println("    status: " + userResult.getStatus());
-                        System.out.println("    isSuccess: " + userResult.isSuccess());
-                        System.out.println("    compilationOutput: " + userResult.getCompilationOutput());
-                        System.out.println("    errorMessage: " + userResult.getErrorMessage());
-                        System.out.println("    totalRuntimeMs: " + userResult.getTotalRuntimeMs());
-                        System.out.println(
-                                        "    outputs count: " + (userResult.getOutputs() != null
-                                                        ? userResult.getOutputs().size()
-                                                        : 0));
-                        if (userResult.getOutputs() != null) {
-                                for (int i = 0; i < userResult.getOutputs().size(); i++) {
-                                        TestCaseOutput o = userResult.getOutputs().get(i);
-                                        System.out.println("    output[" + i + "]: " + o.getOutput() + " (error="
-                                                        + o.getError() + ")");
-                                }
-                        }
+                        structuredLogger.info("User code execution completed",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "user_code_execute",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                        LoggingConstants.STATUS, userResult.getStatus(),
+                                        LoggingConstants.RUNTIME_MS, userResult.getTotalRuntimeMs(),
+                                        LoggingConstants.MEMORY_KB, userResult.getPeakMemoryKb(),
+                                        LoggingConstants.OUTPUT_COUNT,
+                                        userResult.getOutputs() != null ? userResult.getOutputs().size() : 0,
+                                        "has_error", userResult.getErrorMessage() != null,
+                                        "has_compilation_output", userResult.getCompilationOutput() != null);
 
                         // Handle compilation/runtime errors
                         if (!userResult.isSuccess()) {
-                                System.out.println(
-                                                "[UnifiedExecutionService] User execution FAILED - returning error response");
                                 return handleExecutionError(userResult);
                         }
 
                         // 7. Execute oracle (batch - single CXE call)
-                        System.out.println("\n[UnifiedExecutionService] Step 7: EXECUTING ORACLE...");
-                        log.debug("[{}] Executing oracle", runId);
                         BatchExecutionResult oracleResult = oracleService.executeOracle(
                                         request.getQuestionId(), testcases);
 
-                        System.out.println("[UnifiedExecutionService] Oracle Execution RESULT:");
-                        System.out.println("    status: " + oracleResult.getStatus());
-                        System.out.println("    isSuccess: " + oracleResult.isSuccess());
-                        System.out.println(
-                                        "    outputs count: " + (oracleResult.getOutputs() != null
-                                                        ? oracleResult.getOutputs().size()
-                                                        : 0));
-                        if (oracleResult.getOutputs() != null) {
-                                for (int i = 0; i < oracleResult.getOutputs().size(); i++) {
-                                        TestCaseOutput o = oracleResult.getOutputs().get(i);
-                                        System.out.println("    output[" + i + "]: " + o.getOutput());
-                                }
-                        }
+                        structuredLogger.info("Oracle execution completed for run",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "oracle_execute",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                        LoggingConstants.STATUS, oracleResult.getStatus(),
+                                        LoggingConstants.OUTPUT_COUNT,
+                                        oracleResult.getOutputs() != null ? oracleResult.getOutputs().size() : 0);
 
                         // 8. Compare results and build response
-                        System.out.println(
-                                        "\n[UnifiedExecutionService] Step 8: COMPARING RESULTS (Judging via Pipeline)...");
                         RunResponseDto response = buildRunResponse(userResult, oracleResult, metadata);
 
-                        System.out.println("[UnifiedExecutionService] Final Response Built:");
-                        System.out.println("    verdict: " + response.getVerdict());
-                        System.out.println("    success: " + response.isSuccess());
-                        System.out.println("-".repeat(80) + "\n");
+                        structuredLogger.info("Run execution completed",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "run_execute",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                        LoggingConstants.VERDICT, response.getVerdict(),
+                                        LoggingConstants.STATUS, response.isSuccess() ? "SUCCESS" : "FAILED",
+                                        LoggingConstants.RUNTIME_MS, response.getRuntimeMs(),
+                                        LoggingConstants.MEMORY_KB, response.getMemoryKb());
 
                         return response;
 
                 } catch (OracleMissingException e) {
-                        log.error("[{}] Oracle missing: {}", runId, e.getMessage());
-                        System.out.println("[UnifiedExecutionService] ERROR: Oracle missing - " + e.getMessage());
+                        structuredLogger.error("Run oracle missing",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                                        LoggingConstants.TYPE, "Error",
+                                        LoggingConstants.OPERATION, "run_execute",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId(),
+                                        LoggingConstants.ERROR_MESSAGE, e.getMessage());
                         return RunResponseDto.error(RunVerdict.INTERNAL_ERROR_RUN,
                                         "Question not properly configured for testing");
                 } catch (Exception e) {
-                        log.error("[{}] RUN failed: {}", runId, e.getMessage(), e);
-                        System.out.println(
-                                        "[UnifiedExecutionService] ERROR: " + e.getClass().getSimpleName() + " - "
-                                                        + e.getMessage());
-                        e.printStackTrace();
+                        structuredLogger.error("Run execution failed", e,
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                                        LoggingConstants.TYPE, "Error",
+                                        LoggingConstants.OPERATION, "run_execute",
+                                        LoggingConstants.EXECUTION_ID, runId,
+                                        LoggingConstants.QUESTION_ID, request.getQuestionId());
                         return RunResponseDto.error(RunVerdict.INTERNAL_ERROR_RUN, e.getMessage());
                 }
         }
@@ -287,21 +298,20 @@ public class UnifiedExecutionService {
                 List<TestCaseOutput> userOutputs = userResult.getOutputs();
                 List<TestCaseOutput> oracleOutputs = oracleResult.getOutputs();
 
-                System.out.println("\n" + "~".repeat(60));
-                System.out.println("[buildRunResponse] JUDGING via Pipeline - Comparing User vs Oracle Outputs");
-                System.out.println("~".repeat(60));
-                System.out.println("[buildRunResponse] User outputs count: " + userOutputs.size());
-                System.out.println("[buildRunResponse] Oracle outputs count: " + oracleOutputs.size());
-
                 // Build judging context from metadata DTO
                 JudgingContext judgingContext = buildJudgingContext(metadata);
-                System.out.println("[buildRunResponse] JudgingContext: returnType=" + judgingContext.getReturnType()
-                                + ", nodeType=" + judgingContext.getNodeType()
-                                + ", orderMatters=" + judgingContext.getIsOutputOrderMatters());
+                structuredLogger.debug("Run judging started",
+                                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                LoggingConstants.OPERATION, "judge_run",
+                                LoggingConstants.QUESTION_ID, metadata.getQuestionId(),
+                                "user_output_count", userOutputs.size(),
+                                "oracle_output_count", oracleOutputs.size(),
+                                "return_type", judgingContext.getReturnType(),
+                                "node_type", judgingContext.getNodeType(),
+                                "order_matters", judgingContext.getIsOutputOrderMatters());
 
                 // Assemble pipeline once per question (not per testcase)
                 JudgingPipeline pipeline = pipelineAssembler.assemble(judgingContext);
-                System.out.println("[buildRunResponse] Pipeline assembled");
 
                 List<RunResponseDto.TestCaseRunResult> tcResults = new ArrayList<>();
                 boolean allPassed = true;
@@ -309,13 +319,6 @@ public class UnifiedExecutionService {
                 for (int i = 0; i < userOutputs.size(); i++) {
                         TestCaseOutput userOutput = userOutputs.get(i);
                         TestCaseOutput oracleOutput = (i < oracleOutputs.size()) ? oracleOutputs.get(i) : null;
-
-                        System.out.println("\n[buildRunResponse] TestCase[" + i + "] PIPELINE JUDGING:");
-                        System.out.println("    userOutput:     \"" + userOutput.getOutput() + "\"");
-                        System.out.println(
-                                        "    oracleOutput:   \""
-                                                        + (oracleOutput != null ? oracleOutput.getOutput() : null)
-                                                        + "\"");
 
                         ExecutionOutput userExecOutput = ExecutionOutput.builder()
                                         .rawOutput(userOutput.getOutput())
@@ -329,14 +332,21 @@ public class UnifiedExecutionService {
                                         .build();
 
                         JudgingResult result = pipeline.judge(userExecOutput, oracleExecOutput, judgingContext);
-                        System.out.println("    pipeline.judge(): passed=" + result.isPassed()
-                                        + (result.getFailureReason() != null ? ", reason=" + result.getFailureReason()
-                                                        : ""));
 
                         boolean passed = result.isPassed();
                         if (!passed) {
                                 allPassed = false;
                         }
+
+                        structuredLogger.debug("Run testcase judged",
+                                        LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                        LoggingConstants.OPERATION, "judge_testcase",
+                                        LoggingConstants.QUESTION_ID, metadata.getQuestionId(),
+                                        "testcase_index", i,
+                                        "passed", passed,
+                                        "has_user_error", userOutput.getError() != null,
+                                        "has_oracle_output", oracleOutput != null,
+                                        "failure_reason", result.getFailureReason());
 
                         tcResults.add(RunResponseDto.TestCaseRunResult.builder()
                                         .index(i)
@@ -350,9 +360,13 @@ public class UnifiedExecutionService {
 
                 RunVerdict verdict = allPassed ? RunVerdict.PASSED_RUN : RunVerdict.FAILED_RUN;
 
-                System.out.println("\n[buildRunResponse] FINAL VERDICT: " + verdict);
-                System.out.println("[buildRunResponse] allPassed: " + allPassed);
-                System.out.println("~".repeat(60) + "\n");
+                structuredLogger.info("Run judging completed",
+                                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                                LoggingConstants.OPERATION, "judge_run",
+                                LoggingConstants.QUESTION_ID, metadata.getQuestionId(),
+                                LoggingConstants.VERDICT, verdict,
+                                LoggingConstants.STATUS, allPassed ? "SUCCESS" : "FAILED",
+                                LoggingConstants.TESTCASE_COUNT, tcResults.size());
 
                 return RunResponseDto.builder()
                                 .verdict(verdict)

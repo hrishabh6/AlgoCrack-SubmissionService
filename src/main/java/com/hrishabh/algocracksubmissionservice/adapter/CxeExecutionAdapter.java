@@ -8,6 +8,8 @@ import com.hrishabh.algocracksubmissionservice.dto.ExecutionResponse;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.SubmissionStatusDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
+import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import com.hrishabh.algocracksubmissionservice.service.CodeExecutionClientService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CxeExecutionAdapter implements ExecutionAdapter {
 
+    private final StructuredLogger structuredLogger = new StructuredLogger(CxeExecutionAdapter.class, "SubmissionService");
+
     private final CodeExecutionClientService cxeClient;
     private final ProblemServiceClient problemServiceClient;
     private final ObjectMapper objectMapper;
@@ -37,20 +41,17 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
 
     @Override
     public BatchExecutionResult execute(CodeBundle codeBundle) {
-        log.info("[{}] Executing via CXE adapter", codeBundle.getExecutionId());
-
-        System.out.println("\n" + "*".repeat(80));
-        System.out.println("[CxeExecutionAdapter] execute() CALLED");
-        System.out.println("*".repeat(80));
-        System.out.println("[CxeExecutionAdapter] Input CodeBundle:");
-        System.out.println("    executionId: " + codeBundle.getExecutionId());
-        System.out.println("    questionId: " + codeBundle.getQuestionId());
-        System.out.println("    language: " + codeBundle.getLanguage());
-        System.out.println("    userId: " + codeBundle.getUserId());
-        System.out.println("    intent: " + codeBundle.getIntent());
-        System.out.println("    code length: " + (codeBundle.getCode() != null ? codeBundle.getCode().length() : 0));
-        System.out.println(
-                "    testcases count: " + (codeBundle.getTestcases() != null ? codeBundle.getTestcases().size() : 0));
+        structuredLogger.info("CXE execution started",
+                LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                LoggingConstants.OPERATION, "cxe_execute",
+                LoggingConstants.EXECUTION_ID, codeBundle.getExecutionId(),
+                LoggingConstants.QUESTION_ID, codeBundle.getQuestionId(),
+                LoggingConstants.LANGUAGE, codeBundle.getLanguage(),
+                LoggingConstants.USER_ID, codeBundle.getUserId(),
+                LoggingConstants.CODE_LENGTH, codeBundle.getCode() != null ? codeBundle.getCode().length() : 0,
+                LoggingConstants.TESTCASE_COUNT,
+                codeBundle.getTestcases() != null ? codeBundle.getTestcases().size() : 0,
+                "intent", codeBundle.getIntent());
 
         try {
             // 1. Fetch question metadata if not provided
@@ -63,82 +64,60 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
             // 2. Translate internal DTO → CXE DTO
             ExecutionRequest cxeRequest = translateToRequest(codeBundle);
 
-            System.out.println("\n[CxeExecutionAdapter] CXE ExecutionRequest DTO (SENDING TO CXE):");
-            System.out.println("    submissionId: " + cxeRequest.getSubmissionId());
-            System.out.println("    userId: " + cxeRequest.getUserId());
-            System.out.println("    questionId: " + cxeRequest.getQuestionId());
-            System.out.println("    language: " + cxeRequest.getLanguage());
-            System.out
-                    .println("    code length: " + (cxeRequest.getCode() != null ? cxeRequest.getCode().length() : 0));
-            System.out.println("    metadata.functionName: "
-                    + (cxeRequest.getMetadata() != null ? cxeRequest.getMetadata().getFunctionName() : "null"));
-            System.out.println("    metadata.returnType: "
-                    + (cxeRequest.getMetadata() != null ? cxeRequest.getMetadata().getReturnType() : "null"));
-            System.out.println("    metadata.parameters: "
-                    + (cxeRequest.getMetadata() != null ? cxeRequest.getMetadata().getParameters() : "null"));
-            System.out.println("    testCases count: "
-                    + (cxeRequest.getTestCases() != null ? cxeRequest.getTestCases().size() : 0));
-
-            if (cxeRequest.getTestCases() != null) {
-                for (int i = 0; i < cxeRequest.getTestCases().size(); i++) {
-                    System.out.println("    testCase[" + i + "]: " + cxeRequest.getTestCases().get(i));
-                }
-            }
+            structuredLogger.debug("CXE request built",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                    LoggingConstants.OPERATION, "cxe_request_built",
+                    LoggingConstants.SUBMISSION_ID, cxeRequest.getSubmissionId(),
+                    LoggingConstants.USER_ID, cxeRequest.getUserId(),
+                    LoggingConstants.QUESTION_ID, cxeRequest.getQuestionId(),
+                    LoggingConstants.LANGUAGE, cxeRequest.getLanguage(),
+                    LoggingConstants.CODE_LENGTH, cxeRequest.getCode() != null ? cxeRequest.getCode().length() : 0,
+                    LoggingConstants.TESTCASE_COUNT,
+                    cxeRequest.getTestCases() != null ? cxeRequest.getTestCases().size() : 0,
+                    "function_name", cxeRequest.getMetadata() != null ? cxeRequest.getMetadata().getFunctionName() : null,
+                    "return_type", cxeRequest.getMetadata() != null ? cxeRequest.getMetadata().getReturnType() : null);
 
             // 3. Submit to CXE
-            System.out.println("\n[CxeExecutionAdapter] Submitting to CXE...");
-            log.debug("[{}] Submitting to CXE", codeBundle.getExecutionId());
             ExecutionResponse response = cxeClient.submitCode(cxeRequest);
 
-            System.out.println("[CxeExecutionAdapter] CXE Submit Response:");
-            System.out.println("    submissionId: " + response.getSubmissionId());
-            System.out.println("    status: " + response.getStatus());
-            System.out.println("    message: " + response.getMessage());
-            System.out.println("    queuePosition: " + response.getQueuePosition());
+            structuredLogger.info("CXE submission accepted",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXTERNAL_CALL,
+                    LoggingConstants.OPERATION, "cxe_submit",
+                    LoggingConstants.SUBMISSION_ID, response.getSubmissionId(),
+                    LoggingConstants.EXECUTION_ID, codeBundle.getExecutionId(),
+                    LoggingConstants.STATUS, response.getStatus(),
+                    LoggingConstants.QUEUE_POSITION, response.getQueuePosition());
 
             // 4. Poll for completion
-            System.out.println("\n[CxeExecutionAdapter] Polling CXE for completion...");
             SubmissionStatusDto status = pollForCompletion(response.getSubmissionId());
-
-            System.out.println("\n[CxeExecutionAdapter] CXE Final Status (RECEIVED FROM CXE):");
-            System.out.println("    submissionId: " + status.getSubmissionId());
-            System.out.println("    status: " + status.getStatus());
-            System.out.println("    verdict: " + status.getVerdict());
-            System.out.println("    runtimeMs: " + status.getRuntimeMs());
-            System.out.println("    memoryKb: " + status.getMemoryKb());
-            System.out.println("    errorMessage: " + status.getErrorMessage());
-            System.out.println("    compilationOutput: " + status.getCompilationOutput());
-            System.out.println("    workerId: " + status.getWorkerId());
-            if (status.getTestCaseResults() != null) {
-                System.out.println("    testCaseResults count: " + status.getTestCaseResults().size());
-                for (int i = 0; i < status.getTestCaseResults().size(); i++) {
-                    SubmissionStatusDto.TestCaseResult tc = status.getTestCaseResults().get(i);
-                    System.out.println("    testCaseResult[" + i + "]:");
-                    System.out.println("        index: " + tc.getIndex());
-                    System.out.println("        passed: " + tc.getPassed());
-                    System.out.println("        actualOutput: " + tc.getActualOutput());
-                    System.out.println("        expectedOutput: " + tc.getExpectedOutput());
-                    System.out.println("        executionTimeMs: " + tc.getExecutionTimeMs());
-                    System.out.println("        error: " + tc.getError());
-                }
-            }
 
             // 5. Translate CXE DTO → internal DTO
             BatchExecutionResult result = translateToResult(status);
 
-            System.out.println("\n[CxeExecutionAdapter] Translated BatchExecutionResult:");
-            System.out.println("    status: " + result.getStatus());
-            System.out.println("    isSuccess: " + result.isSuccess());
-            System.out.println("    outputs count: " + (result.getOutputs() != null ? result.getOutputs().size() : 0));
-            System.out.println("*".repeat(80) + "\n");
+            structuredLogger.info("CXE execution completed",
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.EXECUTION,
+                    LoggingConstants.OPERATION, "cxe_execute",
+                    LoggingConstants.SUBMISSION_ID, status.getSubmissionId(),
+                    LoggingConstants.EXECUTION_ID, codeBundle.getExecutionId(),
+                    LoggingConstants.STATUS, result.getStatus(),
+                    LoggingConstants.VERDICT, status.getVerdict(),
+                    LoggingConstants.RUNTIME_MS, status.getRuntimeMs(),
+                    LoggingConstants.MEMORY_KB, status.getMemoryKb(),
+                    LoggingConstants.WORKER_ID, status.getWorkerId(),
+                    LoggingConstants.OUTPUT_COUNT, result.getOutputs() != null ? result.getOutputs().size() : 0,
+                    "has_error", status.getErrorMessage() != null,
+                    "has_compilation_output", status.getCompilationOutput() != null);
 
             return result;
 
         } catch (Exception e) {
-            log.error("[{}] CXE execution failed: {}", codeBundle.getExecutionId(), e.getMessage(), e);
-            System.out.println(
-                    "[CxeExecutionAdapter] EXCEPTION: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-            e.printStackTrace();
+            structuredLogger.error("CXE execution failed", e,
+                    LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.ERROR,
+                    LoggingConstants.TYPE, "Error",
+                    LoggingConstants.OPERATION, "cxe_execute",
+                    LoggingConstants.EXECUTION_ID, codeBundle.getExecutionId(),
+                    LoggingConstants.QUESTION_ID, codeBundle.getQuestionId(),
+                    LoggingConstants.LANGUAGE, codeBundle.getLanguage());
             return BatchExecutionResult.builder()
                     .status(BatchExecutionResult.ExecutionStatus.INTERNAL_ERROR)
                     .errorMessage(e.getMessage())
