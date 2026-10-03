@@ -81,4 +81,22 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
          */
         @Query("SELECT DISTINCT FUNCTION('DATE', s.queuedAt) FROM Submission s WHERE s.userId = :userId")
         List<Object> findDistinctSubmissionDatesByUserId(@Param("userId") String userId);
+
+        /**
+         * Distinct accepted problem/date pairs used by ProblemService to match solves
+         * against its authoritative POTD schedule.
+         */
+        @Query("""
+                        SELECT DISTINCT s.questionId, FUNCTION('DATE', COALESCE(s.completedAt, s.queuedAt))
+                        FROM Submission s
+                        WHERE s.userId = :userId
+                          AND s.status = 'COMPLETED'
+                          AND s.verdict = 'ACCEPTED'
+                          AND COALESCE(s.completedAt, s.queuedAt) >= :from
+                          AND COALESCE(s.completedAt, s.queuedAt) < :to
+                        """)
+        List<Object[]> findDistinctAcceptedQuestionDatesByUserIdBetween(
+                        @Param("userId") String userId,
+                        @Param("from") java.time.LocalDateTime from,
+                        @Param("to") java.time.LocalDateTime to);
 }
