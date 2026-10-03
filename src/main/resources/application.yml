@@ -35,6 +35,21 @@ management:
     health:
       show-details: when_authorized
 
+gamification:
+  badge:
+    graph-tag-name: Graph
+  progress:
+    outbox-batch-size: 25
+    outbox-poll-ms: 5000
+  rank:
+    mastery-easy: 10
+    mastery-medium: 25
+    mastery-hard: 45
+    potd-easy: 6
+    potd-medium: 8
+    potd-hard: 10
+    breadth-cap: 300
+
 # Code Execution Service Configuration
 cxe:
   service:
