@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -220,6 +221,29 @@ public class SubmissionController {
         List<java.time.LocalDate> days = StreakCalculator.toLocalDates(
                 submissionRepository.findDistinctSubmissionDatesByUserId(userId));
         return ResponseEntity.ok(StreakCalculator.calculate(days, java.time.LocalDate.now()));
+    }
+
+    /**
+     * Return accepted problem/date facts for POTD matching in ProblemService.
+     * This endpoint does not decide whether a problem was the POTD.
+     */
+    @GetMapping("/stats/{userId}/accepted-days")
+    public ResponseEntity<List<AcceptedSubmissionDayDto>> getAcceptedSubmissionDays(
+            @PathVariable String userId,
+            @RequestParam LocalDate from,
+            @RequestParam LocalDate to) {
+        if (from.isAfter(to)) {
+            throw new ValidationException("from must not be after to");
+        }
+        List<AcceptedSubmissionDayDto> days = submissionRepository
+                .findDistinctAcceptedQuestionDatesByUserIdBetween(
+                        userId, from.atStartOfDay(), to.plusDays(1).atStartOfDay())
+                .stream()
+                .map(row -> new AcceptedSubmissionDayDto(
+                        ((Number) row[0]).longValue(),
+                        StreakCalculator.toLocalDates(List.of(row[1])).getFirst()))
+                .toList();
+        return ResponseEntity.ok(days);
     }
 
     /**
