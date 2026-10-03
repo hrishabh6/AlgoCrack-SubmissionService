@@ -16,8 +16,12 @@ import com.hrishabh.algocracksubmissionservice.progress.rank.RankCalculationResu
 import com.hrishabh.algocracksubmissionservice.progress.rank.RankCalculator;
 import com.hrishabh.algocracksubmissionservice.progress.rank.RankConstants;
 import com.hrishabh.algocracksubmissionservice.progress.rank.TopicBreadthCalculator;
+import com.hrishabh.algocracksubmissionservice.progress.badge.BadgeAwardService;
+import com.hrishabh.algocracksubmissionservice.progress.badge.BadgeEngine;
+import com.hrishabh.algocracksubmissionservice.progress.badge.BadgeEvaluationContext;
 import com.hrishabh.algocracksubmissionservice.progress.config.RankProperties;
 import com.hrishabh.algocracksubmissionservice.progress.repository.DailyChallengeCompletionRepository;
+import com.hrishabh.algocracksubmissionservice.progress.repository.UserBadgeRepository;
 import com.hrishabh.algocracksubmissionservice.progress.repository.UserProblemSolveRepository;
 import com.hrishabh.algocracksubmissionservice.progress.repository.UserProgressRepository;
 import com.hrishabh.algocracksubmissionservice.progress.repository.UserTopicProgressRepository;
@@ -54,6 +58,9 @@ public class ProgressRecalculationService {
     private final UserTopicProgressRepository userTopicProgressRepository;
     private final RankCalculator rankCalculator;
     private final RankProperties rankProperties;
+    private final UserBadgeRepository userBadgeRepository;
+    private final BadgeEngine badgeEngine;
+    private final BadgeAwardService badgeAwardService;
     private final Clock clock;
 
     public ProgressRecalculationService(
@@ -65,6 +72,9 @@ public class ProgressRecalculationService {
             UserTopicProgressRepository userTopicProgressRepository,
             RankCalculator rankCalculator,
             RankProperties rankProperties,
+            UserBadgeRepository userBadgeRepository,
+            BadgeEngine badgeEngine,
+            BadgeAwardService badgeAwardService,
             Clock clock) {
         this.submissionRepository = submissionRepository;
         this.problemServiceClient = problemServiceClient;
@@ -74,6 +84,9 @@ public class ProgressRecalculationService {
         this.userTopicProgressRepository = userTopicProgressRepository;
         this.rankCalculator = rankCalculator;
         this.rankProperties = rankProperties;
+        this.userBadgeRepository = userBadgeRepository;
+        this.badgeEngine = badgeEngine;
+        this.badgeAwardService = badgeAwardService;
         this.clock = clock;
     }
 
@@ -238,7 +251,9 @@ public class ProgressRecalculationService {
                 .calculatedAt(calculatedAt)
                 .build();
 
-        return userProgressRepository.save(progress);
+        UserProgress saved = userProgressRepository.save(progress);
+        awardBadges(userId, saved, topicRows);
+        return saved;
     }
 
     private void clearDerivedState(String userId) {
@@ -270,7 +285,21 @@ public class ProgressRecalculationService {
                 .rankTierCode(calculated.getRankTierCode())
                 .calculatedAt(LocalDateTime.now(clock))
                 .build();
-        return userProgressRepository.save(progress);
+        UserProgress saved = userProgressRepository.save(progress);
+        awardBadges(userId, saved, List.of());
+        return saved;
+    }
+
+    private void awardBadges(String userId, UserProgress progress, List<UserTopicProgress> topicRows) {
+        Set<String> earned = userBadgeRepository.findBadgeCodesByUserId(userId);
+        BadgeEvaluationContext context = BadgeEvaluationContext.builder()
+                .userId(userId)
+                .progress(progress)
+                .topicProgress(topicRows)
+                .earnedBadgeCodes(earned)
+                .build();
+        Set<String> newlyEarned = badgeEngine.evaluateNewlyEarned(context);
+        badgeAwardService.awardNewBadges(userId, newlyEarned, "REBUILD", RankConstants.ALGORITHM_VERSION);
     }
 
     private Map<Long, QuestionRankMetadataItem> loadMetadata(Set<Long> questionIds) {

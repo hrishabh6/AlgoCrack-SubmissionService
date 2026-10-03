@@ -36,6 +36,11 @@ management:
       show-details: when_authorized
 
 gamification:
+  badge:
+    graph-tag-name: Graph
+  progress:
+    outbox-batch-size: 25
+    outbox-poll-ms: 5000
   rank:
     mastery-easy: 10
     mastery-medium: 25

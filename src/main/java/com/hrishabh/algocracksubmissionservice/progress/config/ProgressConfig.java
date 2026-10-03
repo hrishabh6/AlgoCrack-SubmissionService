@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import java.time.Clock;
 
 @Configuration
-@EnableConfigurationProperties(RankProperties.class)
+@EnableConfigurationProperties({RankProperties.class, BadgeProperties.class})
 public class ProgressConfig {
 
     @Bean
