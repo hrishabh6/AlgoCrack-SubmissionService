@@ -3,13 +3,22 @@ package com.hrishabh.algocracksubmissionservice.client;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.ReferenceSolutionDto;
 import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
+import com.hrishabh.algocracksubmissionservice.dto.progress.QuestionRankMetadataApiDtos.PotdResolveResponse;
+import com.hrishabh.algocracksubmissionservice.dto.progress.QuestionRankMetadataApiDtos.RankMetadataBatchRequest;
+import com.hrishabh.algocracksubmissionservice.dto.progress.QuestionRankMetadataApiDtos.RankMetadataBatchResponse;
+import com.hrishabh.algocracksubmissionservice.helper.CurrentUser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -65,5 +74,31 @@ public class ProblemServiceClient {
         String url = problemServiceUrl + "/api/v1/questions/" + questionId + "/reference-solution";
         log.debug("Fetching oracle from: {}", url);
         return restTemplate.getForObject(url, ReferenceSolutionDto.class);
+    }
+
+    public RankMetadataBatchResponse fetchRankMetadataBatch(List<Long> questionIds) {
+        String url = problemServiceUrl + "/api/v1/internal/questions/rank-metadata";
+        log.debug("Fetching rank metadata batch from: {}", url);
+        HttpEntity<RankMetadataBatchRequest> entity = new HttpEntity<>(
+                new RankMetadataBatchRequest(questionIds),
+                internalHeaders());
+        return restTemplate.exchange(url, HttpMethod.POST, entity, RankMetadataBatchResponse.class).getBody();
+    }
+
+    public PotdResolveResponse resolvePotdCompletion(long questionId, Instant completedAt) {
+        String url = UriComponentsBuilder.fromHttpUrl(problemServiceUrl + "/api/v1/internal/daily-challenges/resolve")
+                .queryParam("questionId", questionId)
+                .queryParam("completedAt", completedAt.toString())
+                .toUriString();
+        log.debug("Resolving POTD completion from: {}", url);
+        return restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), PotdResolveResponse.class)
+                .getBody();
+    }
+
+    private static HttpHeaders internalHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set(CurrentUser.INTERNAL_CALL_HEADER, "true");
+        return headers;
     }
 }
