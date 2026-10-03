@@ -31,6 +31,14 @@ public class BadgeEngine {
         return codes;
     }
 
+    public List<BadgeAwardCandidate> evaluateAllCandidates(BadgeEvaluationContext context) {
+        List<BadgeAwardCandidate> candidates = new java.util.ArrayList<>();
+        for (BadgeEvaluator evaluator : evaluators) {
+            candidates.addAll(evaluator.evaluate(context));
+        }
+        return candidates;
+    }
+
     public Set<String> evaluateNewlyEarned(BadgeEvaluationContext context) {
         Set<String> earnedAlready = context.getEarnedBadgeCodes() != null
                 ? context.getEarnedBadgeCodes()
