@@ -8,6 +8,7 @@ import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.judging.*;
+import com.hrishabh.algocracksubmissionservice.progress.service.ProgressOutboxService;
 import com.hrishabh.algocracksubmissionservice.repository.QuestionStatisticsRepository;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +47,7 @@ public class SubmissionProcessingService {
     private final WebSocketService webSocketService;
     private final OracleExecutionService oracleExecutionService;
     private final ObjectMapper objectMapper;
+    private final ProgressOutboxService progressOutboxService;
 
     /**
      * Process submission asynchronously.
@@ -236,6 +238,7 @@ public class SubmissionProcessingService {
         submission.setCompilationOutput(userResult.getCompilationOutput());
         submission.setErrorMessage(userResult.getErrorMessage());
         submissionRepository.save(submission);
+        progressOutboxService.enqueueAcceptedSubmission(submission);
 
         log.info("Submission {} completed with verdict: {}", submission.getSubmissionId(), verdict);
 
