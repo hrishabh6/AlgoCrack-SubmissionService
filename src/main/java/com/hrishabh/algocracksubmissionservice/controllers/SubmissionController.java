@@ -10,6 +10,7 @@ import com.hrishabh.algocracksubmissionservice.repository.QuestionStatisticsRepo
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import com.hrishabh.algocracksubmissionservice.service.CustomExecutionService;
 import com.hrishabh.algocracksubmissionservice.service.StreakCalculator;
+import com.hrishabh.algocracksubmissionservice.helper.CurrentUser;
 import com.hrishabh.algocracksubmissionservice.service.SubmissionService;
 import com.hrishabh.algocracksubmissionservice.service.UnifiedExecutionService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -48,11 +50,15 @@ public class SubmissionController {
      * @return Submission response with ID
      */
     @PostMapping
-    public ResponseEntity<SubmissionResponseDto> submit(@RequestBody SubmissionRequestDto request) {
+    public ResponseEntity<SubmissionResponseDto> submit(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestBody SubmissionRequestDto request) {
+        String userId = CurrentUser.require(userIdHeader);
+        request.setUserId(userId);
         structuredLogger.info("Submission request received",
                 LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.SUBMISSION,
                 LoggingConstants.OPERATION, "submit",
-                LoggingConstants.USER_ID, request.getUserId(),
+                LoggingConstants.USER_ID, userId,
                 LoggingConstants.QUESTION_ID, request.getQuestionId(),
                 LoggingConstants.LANGUAGE, request.getLanguage(),
                 LoggingConstants.CODE_LENGTH, request.getCode() != null ? request.getCode().length() : 0);
@@ -62,7 +68,7 @@ public class SubmissionController {
         structuredLogger.info("Submission queued",
                 LoggingConstants.EVENT_TYPE, LoggingConstants.EventType.SUBMISSION,
                 LoggingConstants.OPERATION, "submit",
-                LoggingConstants.USER_ID, request.getUserId(),
+                LoggingConstants.USER_ID, userId,
                 LoggingConstants.QUESTION_ID, request.getQuestionId(),
                 LoggingConstants.SUBMISSION_ID, submission.getSubmissionId(),
                 LoggingConstants.STATUS, submission.getStatus().name());
@@ -138,10 +144,13 @@ public class SubmissionController {
      */
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<SubmissionDetailDto>> getUserSubmissions(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestHeader(value = CurrentUser.INTERNAL_CALL_HEADER, required = false) String internalCall,
             @PathVariable String userId,
             @RequestParam(required = false) Long questionId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        CurrentUser.requireSelfOrInternal(userId, userIdHeader, internalCall);
         return ResponseEntity.ok(submissionService.getUserSubmissions(userId, questionId, page, size));
     }
 
@@ -179,7 +188,11 @@ public class SubmissionController {
      * Called by ProblemService's UserProfileService.
      */
     @GetMapping("/stats/{userId}")
-    public ResponseEntity<UserSubmissionStatsDto> getUserStats(@PathVariable String userId) {
+    public ResponseEntity<UserSubmissionStatsDto> getUserStats(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestHeader(value = CurrentUser.INTERNAL_CALL_HEADER, required = false) String internalCall,
+            @PathVariable String userId) {
+        CurrentUser.requireSelfOrInternal(userId, userIdHeader, internalCall);
         long easy = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "EASY");
         long medium = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "MEDIUM");
         long hard = submissionRepository.countDistinctSolvedByUserIdAndDifficulty(userId, "HARD");
@@ -207,7 +220,11 @@ public class SubmissionController {
      * Used by ProblemService to derive accurate difficulty distribution.
      */
     @GetMapping("/stats/{userId}/solved-question-ids")
-    public ResponseEntity<List<Long>> getSolvedQuestionIds(@PathVariable String userId) {
+    public ResponseEntity<List<Long>> getSolvedQuestionIds(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestHeader(value = CurrentUser.INTERNAL_CALL_HEADER, required = false) String internalCall,
+            @PathVariable String userId) {
+        CurrentUser.requireSelfOrInternal(userId, userIdHeader, internalCall);
         return ResponseEntity.ok(submissionRepository.findDistinctSolvedQuestionIdsByUserId(userId));
     }
 
@@ -216,10 +233,40 @@ public class SubmissionController {
      * Called by ProblemService's UserProfileService.
      */
     @GetMapping("/stats/{userId}/streak")
-    public ResponseEntity<StreakDto> getStreak(@PathVariable String userId) {
+    public ResponseEntity<StreakDto> getStreak(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestHeader(value = CurrentUser.INTERNAL_CALL_HEADER, required = false) String internalCall,
+            @PathVariable String userId) {
+        CurrentUser.requireSelfOrInternal(userId, userIdHeader, internalCall);
         List<java.time.LocalDate> days = StreakCalculator.toLocalDates(
                 submissionRepository.findDistinctSubmissionDatesByUserId(userId));
         return ResponseEntity.ok(StreakCalculator.calculate(days, java.time.LocalDate.now()));
+    }
+
+    /**
+     * Return accepted problem/date facts for POTD matching in ProblemService.
+     * This endpoint does not decide whether a problem was the POTD.
+     */
+    @GetMapping("/stats/{userId}/accepted-days")
+    public ResponseEntity<List<AcceptedSubmissionDayDto>> getAcceptedSubmissionDays(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestHeader(value = CurrentUser.INTERNAL_CALL_HEADER, required = false) String internalCall,
+            @PathVariable String userId,
+            @RequestParam LocalDate from,
+            @RequestParam LocalDate to) {
+        CurrentUser.requireSelfOrInternal(userId, userIdHeader, internalCall);
+        if (from.isAfter(to)) {
+            throw new ValidationException("from must not be after to");
+        }
+        List<AcceptedSubmissionDayDto> days = submissionRepository
+                .findDistinctAcceptedQuestionDatesByUserIdBetween(
+                        userId, from.atStartOfDay(), to.plusDays(1).atStartOfDay())
+                .stream()
+                .map(row -> new AcceptedSubmissionDayDto(
+                        ((Number) row[0]).longValue(),
+                        StreakCalculator.toLocalDates(List.of(row[1])).getFirst()))
+                .toList();
+        return ResponseEntity.ok(days);
     }
 
     /**
@@ -246,10 +293,13 @@ public class SubmissionController {
      */
     @GetMapping("/heatmap/{userId}")
     public ResponseEntity<HeatmapDataDto> getHeatmap(
+            @RequestHeader(value = CurrentUser.USER_ID_HEADER, required = false) String userIdHeader,
+            @RequestHeader(value = CurrentUser.INTERNAL_CALL_HEADER, required = false) String internalCall,
             @PathVariable String userId,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to) {
+        CurrentUser.requireSelfOrInternal(userId, userIdHeader, internalCall);
         java.time.LocalDate fromDate;
         java.time.LocalDate toDate;
 
