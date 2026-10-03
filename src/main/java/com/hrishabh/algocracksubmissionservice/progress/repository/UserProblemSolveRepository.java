@@ -13,4 +13,6 @@ public interface UserProblemSolveRepository extends JpaRepository<UserProblemSol
     Optional<UserProblemSolve> findByUserIdAndQuestionId(String userId, long questionId);
 
     boolean existsByUserIdAndQuestionId(String userId, long questionId);
+
+    void deleteByUserId(String userId);
 }

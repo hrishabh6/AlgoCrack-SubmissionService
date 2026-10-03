@@ -10,4 +10,6 @@ public interface DailyChallengeCompletionRepository extends JpaRepository<DailyC
     List<DailyChallengeCompletion> findByUserId(String userId);
 
     boolean existsByUserIdAndDailyChallengeId(String userId, long dailyChallengeId);
+
+    void deleteByUserId(String userId);
 }

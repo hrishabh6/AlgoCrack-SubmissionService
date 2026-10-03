@@ -13,6 +13,8 @@ public interface UserProgressRepository extends JpaRepository<UserProgress, Long
 
     Optional<UserProgress> findByUserIdAndRankAlgorithmVersion(String userId, String rankAlgorithmVersion);
 
+    void deleteByUserIdAndRankAlgorithmVersion(String userId, String rankAlgorithmVersion);
+
     @Query("""
             SELECT up FROM UserProgress up
             WHERE up.rankAlgorithmVersion = :version AND up.totalRankScore > 0
