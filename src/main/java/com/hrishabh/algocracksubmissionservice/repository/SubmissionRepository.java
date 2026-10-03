@@ -99,4 +99,20 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
                         @Param("userId") String userId,
                         @Param("from") java.time.LocalDateTime from,
                         @Param("to") java.time.LocalDateTime to);
+
+        @Query("""
+                        SELECT s FROM Submission s
+                        WHERE s.userId = :userId
+                          AND s.status = com.hrishabh.algocracksubmissionservice.models.SubmissionStatus.COMPLETED
+                          AND s.verdict = com.hrishabh.algocracksubmissionservice.models.SubmissionVerdict.ACCEPTED
+                        ORDER BY s.completedAt ASC, s.queuedAt ASC
+                        """)
+        List<Submission> findAcceptedByUserIdOrderByCompletedAt(@Param("userId") String userId);
+
+        @Query("""
+                        SELECT DISTINCT s.userId FROM Submission s
+                        WHERE s.status = com.hrishabh.algocracksubmissionservice.models.SubmissionStatus.COMPLETED
+                          AND s.verdict = com.hrishabh.algocracksubmissionservice.models.SubmissionVerdict.ACCEPTED
+                        """)
+        List<String> findDistinctAcceptedUserIds();
 }
