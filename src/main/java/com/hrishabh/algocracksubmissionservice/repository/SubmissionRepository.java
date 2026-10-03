@@ -75,4 +75,10 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
                         @Param("userId") String userId,
                         @Param("from") java.time.LocalDateTime from,
                         @Param("to") java.time.LocalDateTime to);
+
+        /**
+         * Distinct calendar days (same DATE() bucketing as the heatmap) on which a user submitted.
+         */
+        @Query("SELECT DISTINCT FUNCTION('DATE', s.queuedAt) FROM Submission s WHERE s.userId = :userId")
+        List<Object> findDistinctSubmissionDatesByUserId(@Param("userId") String userId);
 }

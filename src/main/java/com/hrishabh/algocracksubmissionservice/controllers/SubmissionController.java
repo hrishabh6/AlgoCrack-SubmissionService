@@ -6,8 +6,10 @@ import com.hrishabh.algocracksubmissionservice.exception.TooManyRequestsExceptio
 import com.hrishabh.algocracksubmissionservice.exception.ValidationException;
 import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
 import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
+import com.hrishabh.algocracksubmissionservice.repository.QuestionStatisticsRepository;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import com.hrishabh.algocracksubmissionservice.service.CustomExecutionService;
+import com.hrishabh.algocracksubmissionservice.service.StreakCalculator;
 import com.hrishabh.algocracksubmissionservice.service.SubmissionService;
 import com.hrishabh.algocracksubmissionservice.service.UnifiedExecutionService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,6 +36,9 @@ public class SubmissionController {
     private final CustomExecutionService customExecutionService;
     private final UnifiedExecutionService unifiedExecutionService;
     private final SubmissionRepository submissionRepository;
+    private final QuestionStatisticsRepository questionStatisticsRepository;
+
+    private static final int MAX_QUESTION_STATS_IDS = 200;
 
     /**
      * Submit code for official judging (async).
@@ -204,6 +209,35 @@ public class SubmissionController {
     @GetMapping("/stats/{userId}/solved-question-ids")
     public ResponseEntity<List<Long>> getSolvedQuestionIds(@PathVariable String userId) {
         return ResponseEntity.ok(submissionRepository.findDistinctSolvedQuestionIdsByUserId(userId));
+    }
+
+    /**
+     * Get the user's daily submission streak (current and longest).
+     * Called by ProblemService's UserProfileService.
+     */
+    @GetMapping("/stats/{userId}/streak")
+    public ResponseEntity<StreakDto> getStreak(@PathVariable String userId) {
+        List<java.time.LocalDate> days = StreakCalculator.toLocalDates(
+                submissionRepository.findDistinctSubmissionDatesByUserId(userId));
+        return ResponseEntity.ok(StreakCalculator.calculate(days, java.time.LocalDate.now()));
+    }
+
+    /**
+     * Aggregate submission counts for a batch of questions.
+     * Called by ProblemService to populate acceptance rates for one page of problems.
+     */
+    @GetMapping("/question-stats")
+    public ResponseEntity<List<QuestionStatsDto>> getQuestionStats(@RequestParam List<Long> ids) {
+        if (ids.size() > MAX_QUESTION_STATS_IDS) {
+            throw new ValidationException("At most " + MAX_QUESTION_STATS_IDS + " question ids are allowed");
+        }
+        return ResponseEntity.ok(questionStatisticsRepository.findByQuestionIdIn(ids).stream()
+                .map(stats -> QuestionStatsDto.builder()
+                        .questionId(stats.getQuestionId())
+                        .totalSubmissions(stats.getTotalSubmissions())
+                        .acceptedSubmissions(stats.getAcceptedSubmissions())
+                        .build())
+                .collect(java.util.stream.Collectors.toList()));
     }
 
     /**
