@@ -13,7 +13,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-    show-sql: true
+    show-sql: false
   flyway:
     enabled: true
     connect-retries: ${SPRING_FLYWAY_CONNECT_RETRIES:10}
@@ -26,7 +26,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,prometheus
+  prometheus:
+    metrics:
+      export:
+        enabled: true
   endpoint:
     health:
       show-details: when_authorized
@@ -46,7 +50,7 @@ async:
 # Logging
 logging:
   level:
-    com.hrishabh.algocracksubmissionservice: DEBUG
+    com.hrishabh.algocracksubmissionservice: INFO
 
 # Inter-service communication
 services:

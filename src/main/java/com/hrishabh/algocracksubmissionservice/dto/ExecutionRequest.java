@@ -19,6 +19,7 @@ public class ExecutionRequest {
     private Long questionId;
     private String language;
     private String code;
+    private String requestId;
     private QuestionMetadata metadata;
     private List<Map<String, Object>> testCases;
 

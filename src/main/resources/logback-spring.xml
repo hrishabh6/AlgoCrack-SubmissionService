@@ -14,5 +14,5 @@
         <appender-ref ref="CONSOLE"/>
     </root>
 
-    <logger name="com.hrishabh.algocracksubmissionservice" level="${LOG_LEVEL_SUBMISSION_SERVICE:DEBUG}"/>
+    <logger name="com.hrishabh.algocracksubmissionservice" level="${LOG_LEVEL_SUBMISSION_SERVICE:INFO}"/>
 </configuration>

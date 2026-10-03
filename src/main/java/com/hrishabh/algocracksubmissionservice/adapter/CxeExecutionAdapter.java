@@ -9,6 +9,7 @@ import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.SubmissionStatusDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.logging.LoggingConstants;
+import com.hrishabh.algocracksubmissionservice.logging.RequestContext;
 import com.hrishabh.algocracksubmissionservice.logging.StructuredLogger;
 import com.hrishabh.algocracksubmissionservice.service.CodeExecutionClientService;
 import lombok.RequiredArgsConstructor;
@@ -191,6 +192,7 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
                 .questionId(bundle.getQuestionId())
                 .language(bundle.getLanguage().name())
                 .code(bundle.getCode())
+                .requestId(RequestContext.getRequestId())
                 .metadata(cxeMetadata)
                 .testCases(testCaseMaps)
                 .build();

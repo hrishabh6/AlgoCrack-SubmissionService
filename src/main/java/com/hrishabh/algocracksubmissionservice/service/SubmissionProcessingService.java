@@ -53,7 +53,7 @@ public class SubmissionProcessingService {
      * @param submissionId The UUID of the submission to process (NOT the entity to
      *                     avoid detached entity issues)
      */
-    @Async
+    @Async("submissionExecutor")
     @Transactional
     public void processSubmission(String submissionId) {
         log.info("Starting async processing for submission: {}", submissionId);

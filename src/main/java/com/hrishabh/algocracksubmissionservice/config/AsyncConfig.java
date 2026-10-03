@@ -1,5 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.config;
 
+import com.hrishabh.algocracksubmissionservice.logging.RequestContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,6 +34,19 @@ public class AsyncConfig {
         executor.setThreadNamePrefix("submission-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(60);
+        executor.setTaskDecorator(runnable -> {
+            String requestId = RequestContext.getRequestId();
+            return () -> {
+                if (requestId != null) {
+                    RequestContext.setRequestId(requestId);
+                }
+                try {
+                    runnable.run();
+                } finally {
+                    RequestContext.clear();
+                }
+            };
+        });
         executor.initialize();
         return executor;
     }
