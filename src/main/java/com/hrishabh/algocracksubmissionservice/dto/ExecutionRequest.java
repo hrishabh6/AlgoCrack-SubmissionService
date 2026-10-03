@@ -15,9 +15,13 @@ import java.util.Map;
 public class ExecutionRequest {
 
     private String submissionId;
+    private String executionId;
     private String userId;
     private Long questionId;
     private String language;
+    /** CXE JSON field {@code executionMode}; omit or SUBMISSION for problem flows. */
+    private String executionMode;
+    private String stdin;
     private String code;
     private String requestId;
     private QuestionMetadata metadata;

@@ -13,6 +13,7 @@ import java.util.List;
 public class SubmissionStatusDto {
 
     private String submissionId;
+    private String executionId;
     private String status;
     private String verdict;
     private Integer runtimeMs;
@@ -24,6 +25,12 @@ public class SubmissionStatusDto {
     private Long startedAt;
     private Long completedAt;
     private String workerId;
+    private String executionMode;
+    private String rawExecutionStatus;
+    private String stdout;
+    private String stderr;
+    private Integer exitCode;
+    private Boolean outputTruncated;
 
     @Data
     @Builder

@@ -50,6 +50,11 @@ gamification:
     potd-hard: 10
     breadth-cap: 300
 
+playground:
+  api-enabled: ${PLAYGROUND_API_ENABLED:false}
+  run-enabled: ${PLAYGROUND_RUN_ENABLED:false}
+  guard-cleanup-ms: ${PLAYGROUND_GUARD_CLEANUP_MS:300000}
+
 # Code Execution Service Configuration
 cxe:
   service:

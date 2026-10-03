@@ -3,6 +3,7 @@ package com.hrishabh.algocracksubmissionservice.adapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrishabh.algocracksubmissionservice.models.Language;
 import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
+import com.hrishabh.algocracksubmissionservice.dto.ExecutionMode;
 import com.hrishabh.algocracksubmissionservice.dto.ExecutionRequest;
 import com.hrishabh.algocracksubmissionservice.dto.ExecutionResponse;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
@@ -191,6 +192,7 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
                 .userId(bundle.getUserId() != null ? bundle.getUserId() : "ANONYMOUS")
                 .questionId(bundle.getQuestionId())
                 .language(bundle.getLanguage().name())
+                .executionMode(ExecutionMode.SUBMISSION.name())
                 .code(bundle.getCode())
                 .requestId(RequestContext.getRequestId())
                 .metadata(cxeMetadata)

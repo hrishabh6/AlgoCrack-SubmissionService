@@ -111,6 +111,7 @@ public class CustomExecutionService {
                 .userId("ANONYMOUS") // No user association for custom runs
                 .questionId(request.getQuestionId())
                 .language(request.getLanguage())
+                .executionMode(ExecutionMode.SUBMISSION.name())
                 .code(request.getCode())
                 .metadata(metadataDto)
                 .testCases(testCaseMaps)

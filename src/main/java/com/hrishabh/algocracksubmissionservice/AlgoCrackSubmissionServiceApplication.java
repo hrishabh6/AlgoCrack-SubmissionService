@@ -11,11 +11,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EntityScan({
         "com.hrishabh.algocracksubmissionservice.models",
-        "com.hrishabh.algocracksubmissionservice.progress.model"
+        "com.hrishabh.algocracksubmissionservice.progress.model",
+        "com.hrishabh.algocracksubmissionservice.playground.model"
 })
 @EnableJpaRepositories({
         "com.hrishabh.algocracksubmissionservice.repository",
-        "com.hrishabh.algocracksubmissionservice.progress.repository"
+        "com.hrishabh.algocracksubmissionservice.progress.repository",
+        "com.hrishabh.algocracksubmissionservice.playground.repository"
 })
 @EnableJpaAuditing
 @EnableAsync
