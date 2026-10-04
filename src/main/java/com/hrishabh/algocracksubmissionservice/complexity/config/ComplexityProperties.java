@@ -24,5 +24,28 @@ public class ComplexityProperties {
      */
     private boolean staticAnalysisEnabled = false;
 
+    /**
+     * When true (with static worker), runs benchmark + dynamic inference after static analysis.
+     */
+    private boolean dynamicProfilingEnabled = false;
+
     private long workerPollMs = 2000L;
+
+    private long workerLeaseSeconds = 45L;
+
+    private int cxeProfilePollMaxAttempts = 240;
+
+    private long cxeProfilePollIntervalMs = 500L;
+
+    private Measurement measurement = new Measurement();
+
+    @Getter
+    @Setter
+    public static class Measurement {
+        private int minUsableSizePoints = 4;
+        private long minUsefulDurationNs = 50_000L;
+        private double maxRelativeMad = 0.35;
+        private double maxNormalizedSpread = 0.45;
+        private double minWinnerMargin = 0.15;
+    }
 }

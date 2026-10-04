@@ -6,6 +6,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityAnalysis
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityAnalysisDtos.ComplexityAnalysisSummaryResponse;
 import com.hrishabh.algocracksubmissionservice.complexity.exception.ComplexityAnalysisNotFoundException;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityAnalysisRepository;
+import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityBenchmarkRunRepository;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityStaticFindingRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -24,6 +25,7 @@ public class ComplexityAnalysisReadService {
     private final ComplexityAnalysisMapper mapper;
     private final ComplexityProperties properties;
     private final ComplexityStaticFindingRepository findingRepository;
+    private final ComplexityBenchmarkRunRepository benchmarkRunRepository;
 
     @Transactional(readOnly = true)
     public ComplexityAnalysisHistoryResponse listAnalyses(String submissionPublicId, String userId, int page, int size) {
@@ -46,6 +48,11 @@ public class ComplexityAnalysisReadService {
         var analysis = complexityAnalysisRepository.findByAnalysisIdAndSubmissionId(analysisId, submissionPublicId)
                 .orElseThrow(ComplexityAnalysisNotFoundException::new);
         var findings = findingRepository.findByAnalysisIdOrderByIdAsc(analysis.getAnalysisId());
-        return mapper.toDetail(analysis, analysis.getReusedFromAnalysisId() != null ? Boolean.TRUE : null, findings);
+        var benchmarkRuns = benchmarkRunRepository.findByAnalysisId(analysis.getAnalysisId());
+        return mapper.toDetail(
+                analysis,
+                analysis.getReusedFromAnalysisId() != null ? Boolean.TRUE : null,
+                findings,
+                benchmarkRuns);
     }
 }

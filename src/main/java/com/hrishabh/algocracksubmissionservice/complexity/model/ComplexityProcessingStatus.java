@@ -3,8 +3,9 @@ package com.hrishabh.algocracksubmissionservice.complexity.model;
 public enum ComplexityProcessingStatus {
     QUEUED,
     STATIC_ANALYZING,
-    PROFILE_PREPARING,
-    PROFILING,
+    BENCHMARK_PREPARING,
+    BENCHMARK_QUEUED,
+    BENCHMARKING,
     RECONCILING,
     COMPLETED,
     FAILED

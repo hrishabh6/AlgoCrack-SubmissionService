@@ -58,9 +58,19 @@ playground:
 complexity:
   api-enabled: ${COMPLEXITY_API_ENABLED:false}
   static-analysis-enabled: ${COMPLEXITY_STATIC_ANALYSIS_ENABLED:false}
+  dynamic-profiling-enabled: ${COMPLEXITY_DYNAMIC_PROFILING_ENABLED:false}
   max-page-size: ${COMPLEXITY_MAX_PAGE_SIZE:20}
   poll-after-ms: ${COMPLEXITY_POLL_AFTER_MS:1000}
   worker-poll-ms: ${COMPLEXITY_WORKER_POLL_MS:2000}
+  worker-lease-seconds: ${COMPLEXITY_WORKER_LEASE_SECONDS:45}
+  cxe-profile-poll-max-attempts: ${COMPLEXITY_CXE_PROFILE_POLL_MAX_ATTEMPTS:240}
+  cxe-profile-poll-interval-ms: ${COMPLEXITY_CXE_PROFILE_POLL_INTERVAL_MS:500}
+  measurement:
+    min-usable-size-points: ${COMPLEXITY_MIN_USABLE_SIZE_POINTS:4}
+    min-useful-duration-ns: ${COMPLEXITY_MIN_USEFUL_DURATION_NS:50000}
+    max-relative-mad: ${COMPLEXITY_MAX_RELATIVE_MAD:0.35}
+    max-normalized-spread: ${COMPLEXITY_MAX_NORMALIZED_SPREAD:0.45}
+    min-winner-margin: ${COMPLEXITY_MIN_WINNER_MARGIN:0.15}
 
 # Code Execution Service Configuration
 cxe:

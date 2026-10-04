@@ -26,6 +26,24 @@ public class ComplexityBenchmarkRun {
     @Column(name = "case_id", nullable = false, length = 64)
     private String caseId;
 
+    @Column(name = "case_identity", nullable = false, length = 128)
+    private String caseIdentity;
+
+    @Column(name = "profile_version", length = 32)
+    private String profileVersion;
+
+    @Column(name = "profile_hash", length = 64)
+    private String profileHash;
+
+    @Column(name = "generator_version", length = 32)
+    private String generatorVersion;
+
+    @Column(name = "harness_version", length = 32)
+    private String harnessVersion;
+
+    @Column(name = "measurement_policy_version", length = 32)
+    private String measurementPolicyVersion;
+
     @Column(nullable = false, length = 32)
     private String variant;
 
@@ -44,8 +62,23 @@ public class ComplexityBenchmarkRun {
     @Column(name = "warmup_count", nullable = false)
     private int warmupCount;
 
+    @Column(name = "median_elapsed_ns")
+    private Long medianElapsedNs;
+
+    @Column(name = "mad_elapsed_ns")
+    private Long madElapsedNs;
+
+    @Column(name = "min_elapsed_ns")
+    private Long minElapsedNs;
+
+    @Column(name = "max_elapsed_ns")
+    private Long maxElapsedNs;
+
     @Column(name = "output_validated", nullable = false)
     private boolean outputValidated;
+
+    @Column(name = "environment_fingerprint", length = 128)
+    private String environmentFingerprint;
 
     @Column(nullable = false, length = 32)
     private String outcome;

@@ -9,7 +9,9 @@ import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityAnalysis
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityAnalysisDtos.ComplexityVariableResponse;
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityAnalysisDtos.ComplexityVersionsResponse;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityAnalysis;
+import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResultKind;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityStaticFinding;
+import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityBenchmarkRun;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -47,7 +49,8 @@ public class ComplexityAnalysisMapper {
     public ComplexityAnalysisDetailResponse toDetail(
             ComplexityAnalysis analysis,
             Boolean reusedFlag,
-            List<ComplexityStaticFinding> findings) {
+            List<ComplexityStaticFinding> findings,
+            List<ComplexityBenchmarkRun> benchmarkRuns) {
         ComplexityEstimateResponse time = analysis.getTimeBigO() == null ? null : new ComplexityEstimateResponse(
                 analysis.getTimeExpression(),
                 analysis.getTimeBigO(),
@@ -68,16 +71,25 @@ public class ComplexityAnalysisMapper {
                 .map(f -> f.getCategory() + ": " + f.getSummary())
                 .limit(20)
                 .toList();
+        boolean staticAvailable = !staticEvidence.isEmpty() || analysis.getTimeBigO() != null;
+        boolean dynamicAvailable = analysis.getResultKind() == ComplexityResultKind.HYBRID
+                || analysis.getResultKind() == ComplexityResultKind.EMPIRICAL_ONLY
+                || (benchmarkRuns != null && !benchmarkRuns.isEmpty());
+        List<String> dynamicEvidence = dynamicAvailable
+                ? List.of("benchmarkAggregates=" + (benchmarkRuns == null ? 0 : benchmarkRuns.size()))
+                : Collections.emptyList();
 
         ComplexityVersionsResponse versions = new ComplexityVersionsResponse(
                 analysis.getAnalyzerVersion(),
-                null,
+                analysis.getInferenceVersion(),
                 analysis.getConfidenceModelVersion(),
                 analysis.getKnowledgeBaseVersion(),
-                null,
-                null,
-                null,
-                null);
+                analysis.getProfileVersion(),
+                analysis.getGeneratorVersion(),
+                analysis.getHarnessVersion(),
+                analysis.getMeasurementPolicyVersion());
+
+        List<String> limitations = jsonSupport.readStringList(analysis.getLimitationsJson());
 
         return new ComplexityAnalysisDetailResponse(
                 analysis.getAnalysisId(),
@@ -90,9 +102,10 @@ public class ComplexityAnalysisMapper {
                 time,
                 space,
                 variables,
-                new ComplexityEvidenceResponse(staticEvidence, Collections.emptyList()),
-                jsonSupport.readStringList(analysis.getLimitationsJson()),
+                new ComplexityEvidenceResponse(staticEvidence, dynamicEvidence, staticAvailable, dynamicAvailable),
+                limitations,
                 versions,
-                reusedFlag);
+                reusedFlag,
+                limitations);
     }
 }

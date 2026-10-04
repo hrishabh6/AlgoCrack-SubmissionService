@@ -32,6 +32,8 @@ import static org.mockito.Mockito.*;
 class ComplexityStaticAnalysisPipelineTest {
 
     @Mock
+    private ComplexityAnalysisOrchestrator orchestrator;
+    @Mock
     private ComplexityAnalysisRepository analysisRepository;
     @Mock
     private ComplexityStaticFindingRepository findingRepository;
@@ -45,6 +47,7 @@ class ComplexityStaticAnalysisPipelineTest {
     @BeforeEach
     void setUp() {
         pipeline = new ComplexityStaticAnalysisPipeline(
+                orchestrator,
                 analysisRepository,
                 findingRepository,
                 submissionRepository,
@@ -55,47 +58,15 @@ class ComplexityStaticAnalysisPipelineTest {
     }
 
     @Test
-    void completesStaticAnalysisAndReleasesActiveSlotWithoutMutatingSubmission() {
-        ComplexityAnalysis analysis = ComplexityAnalysis.builder()
+    void delegatesToOrchestratorWithoutMutatingSubmission() {
+        ComplexityAnalysis completed = ComplexityAnalysis.builder()
                 .analysisId("a-1")
-                .submissionId("sub-1")
-                .ownerUserId("u-1")
-                .questionId(1L)
-                .language("JAVA")
-                .status(ComplexityProcessingStatus.QUEUED)
-                .sourceSha256("abc")
-                .activeSlot(ComplexityAnalysis.ACTIVE_SLOT_VALUE)
+                .status(ComplexityProcessingStatus.COMPLETED)
                 .build();
-
-        Submission submission = Submission.builder()
-                .submissionId("sub-1")
-                .userId("u-1")
-                .questionId(1L)
-                .language("java")
-                .code("class Solution { public int solve() { return 1; } }")
-                .status(SubmissionStatus.COMPLETED)
-                .verdict(SubmissionVerdict.ACCEPTED)
-                .build();
-
-        when(analysisRepository.findByAnalysisId("a-1")).thenReturn(Optional.of(analysis));
-        when(analysisRepository.claimQueuedForStaticAnalysis("a-1")).thenReturn(1);
-        when(submissionRepository.findBySubmissionId("sub-1")).thenReturn(Optional.of(submission));
-        when(problemServiceClient.getMetadata(1L, "JAVA")).thenReturn(QuestionMetadataApiDto.builder()
-                .functionName("solve")
-                .paramNames(List.of())
-                .paramTypes(List.of())
-                .build());
-        when(analysisRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(analysisRepository.findByAnalysisId("a-1")).thenReturn(Optional.of(completed));
 
         assertTrue(pipeline.processQueuedAnalysis("a-1"));
-
-        ArgumentCaptor<ComplexityAnalysis> captor = ArgumentCaptor.forClass(ComplexityAnalysis.class);
-        verify(analysisRepository, atLeastOnce()).save(captor.capture());
-        ComplexityAnalysis terminal = captor.getAllValues().getLast();
-        assertEquals(ComplexityProcessingStatus.COMPLETED, terminal.getStatus());
-        assertNull(terminal.getActiveSlot());
-        assertEquals(ComplexityResultKind.STATIC_ONLY, terminal.getResultKind());
-        assertNotNull(terminal.getTimeBigO());
+        verify(orchestrator).advance("a-1");
         verify(submissionRepository, never()).save(any());
     }
 }

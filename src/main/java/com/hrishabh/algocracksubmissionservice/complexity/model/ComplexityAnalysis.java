@@ -69,6 +69,33 @@ public class ComplexityAnalysis {
     @Column(name = "knowledge_base_version", length = 32)
     private String knowledgeBaseVersion;
 
+    @Column(name = "profile_id", length = 64)
+    private String profileId;
+
+    @Column(name = "profile_version", length = 32)
+    private String profileVersion;
+
+    @Column(name = "profile_hash", length = 64)
+    private String profileHash;
+
+    @Column(name = "generator_version", length = 32)
+    private String generatorVersion;
+
+    @Column(name = "inference_version", length = 32)
+    private String inferenceVersion;
+
+    @Column(name = "harness_version", length = 32)
+    private String harnessVersion;
+
+    @Column(name = "measurement_policy_version", length = 32)
+    private String measurementPolicyVersion;
+
+    @Column(name = "profiler_runtime_version", length = 32)
+    private String profilerRuntimeVersion;
+
+    @Column(name = "profile_execution_id", length = 36)
+    private String profileExecutionId;
+
     @Column(name = "time_expression", length = 255)
     private String timeExpression;
 

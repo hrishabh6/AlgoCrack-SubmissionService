@@ -45,6 +45,27 @@ public class ComplexityAnalysisJsonSupport {
         }
     }
 
+    public String writeIntegerMap(Map<String, Integer> map) {
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize JSON map", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Integer> readIntegerMap(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {
+            });
+        } catch (JsonProcessingException e) {
+            return Map.of();
+        }
+    }
+
     public Map<String, String> readStringMap(String json) {
         if (json == null || json.isBlank()) {
             return Map.of();

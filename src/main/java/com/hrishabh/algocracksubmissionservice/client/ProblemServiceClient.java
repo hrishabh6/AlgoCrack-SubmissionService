@@ -1,5 +1,8 @@
 package com.hrishabh.algocracksubmissionservice.client;
 
+import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityProfileApiDtos.CasesRequest;
+import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityProfileApiDtos.CasesResponse;
+import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityProfileApiDtos.ProfileMetadataResponse;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.ReferenceSolutionDto;
 import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
@@ -20,6 +23,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * HTTP client for ProblemService APIs.
@@ -77,6 +81,31 @@ public class ProblemServiceClient {
         String url = problemServiceUrl + "/api/v1/internal/questions/" + questionId + "/reference-solution";
         log.debug("Fetching oracle from internal endpoint: {}", url);
         return restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), ReferenceSolutionDto.class)
+                .getBody();
+    }
+
+    public Optional<ProfileMetadataResponse> getActiveComplexityProfile(long questionId, String language) {
+        String url = UriComponentsBuilder.fromHttpUrl(problemServiceUrl
+                        + "/api/v1/internal/questions/" + questionId + "/complexity-profile")
+                .queryParam("language", language)
+                .toUriString();
+        try {
+            ProfileMetadataResponse body = restTemplate.exchange(
+                            url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), ProfileMetadataResponse.class)
+                    .getBody();
+            return Optional.ofNullable(body);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound ex) {
+            return Optional.empty();
+        }
+    }
+
+    public CasesResponse generateComplexityProfileCases(long questionId, CasesRequest request) {
+        String url = problemServiceUrl + "/api/v1/internal/questions/" + questionId + "/complexity-profile/cases";
+        return restTemplate.exchange(
+                        url,
+                        HttpMethod.POST,
+                        new HttpEntity<>(request, internalHeaders()),
+                        CasesResponse.class)
                 .getBody();
     }
 

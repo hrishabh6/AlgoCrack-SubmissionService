@@ -59,13 +59,18 @@ public final class ComplexityAnalysisDtos {
             ComplexityEvidenceResponse evidence,
             List<String> limitations,
             ComplexityVersionsResponse versions,
-            Boolean reused) {
+            Boolean reused,
+            List<String> reasonCodes) {
     }
 
     public record ComplexityVariableResponse(String name, String meaning) {
     }
 
-    public record ComplexityEvidenceResponse(List<String> staticEvidence, List<String> dynamic) {
+    public record ComplexityEvidenceResponse(
+            List<String> staticEvidence,
+            List<String> dynamic,
+            boolean staticEvidenceAvailable,
+            boolean dynamicEvidenceAvailable) {
     }
 
     public record ComplexityVersionsResponse(

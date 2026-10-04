@@ -28,6 +28,7 @@ import java.util.Optional;
 @Slf4j
 public class ComplexityStaticAnalysisPipeline {
 
+    private final ComplexityAnalysisOrchestrator orchestrator;
     private final ComplexityAnalysisRepository analysisRepository;
     private final ComplexityStaticFindingRepository findingRepository;
     private final SubmissionRepository submissionRepository;
@@ -36,45 +37,11 @@ public class ComplexityStaticAnalysisPipeline {
     private final JdkKnowledgeBase knowledgeBase;
     private final ComplexityAnalysisJsonSupport jsonSupport;
 
-    @Transactional
     public boolean processQueuedAnalysis(String analysisPublicId) {
-        Optional<ComplexityAnalysis> optional = analysisRepository.findByAnalysisId(analysisPublicId);
-        if (optional.isEmpty()) {
-            return false;
-        }
-        ComplexityAnalysis analysis = optional.get();
-        if (analysis.getStatus() == ComplexityProcessingStatus.COMPLETED) {
-            return false;
-        }
-        if (analysis.getStatus() != ComplexityProcessingStatus.QUEUED || analysis.getActiveSlot() == null) {
-            return false;
-        }
-
-        int claimed = analysisRepository.claimQueuedForStaticAnalysis(analysisPublicId);
-        if (claimed == 0) {
-            return false;
-        }
-        analysis = analysisRepository.findByAnalysisId(analysisPublicId).orElseThrow();
-        if (analysis.getStartedAt() == null) {
-            analysis.setStartedAt(LocalDateTime.now());
-            analysisRepository.save(analysis);
-        }
-
-        Submission submission = submissionRepository.findBySubmissionId(analysis.getSubmissionId())
-                .orElseThrow(() -> new IllegalStateException("Submission missing for analysis " + analysisPublicId));
-
-        QuestionMetadataApiDto metadata = fetchMetadataSafely(analysis.getQuestionId());
-        StaticAnalysisResult result = staticAnalyzer.analyze(submission.getCode(), metadata);
-
-        findingRepository.deleteByAnalysisId(analysis.getAnalysisId());
-        persistFindings(analysis.getAnalysisId(), result.findings());
-
-        applyResult(analysis, result);
-        analysis.setStatus(ComplexityProcessingStatus.COMPLETED);
-        analysis.setCompletedAt(LocalDateTime.now());
-        analysis.setActiveSlot(null);
-        analysisRepository.save(analysis);
-        return true;
+        orchestrator.advance(analysisPublicId);
+        return analysisRepository.findByAnalysisId(analysisPublicId)
+                .map(a -> a.getStatus() == ComplexityProcessingStatus.COMPLETED)
+                .orElse(false);
     }
 
     private QuestionMetadataApiDto fetchMetadataSafely(Long questionId) {
