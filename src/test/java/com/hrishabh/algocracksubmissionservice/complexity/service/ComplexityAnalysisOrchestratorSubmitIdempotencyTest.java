@@ -84,6 +84,8 @@ class ComplexityAnalysisOrchestratorSubmitIdempotencyTest {
     private ComplexityAnalysisLeaseService leaseService;
     @Mock
     private ComplexityBenchmarkRunPersister benchmarkRunPersister;
+    @Mock
+    private com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics complexityMetrics;
 
     private ComplexityAnalysisOrchestrator orchestrator;
 
@@ -109,7 +111,8 @@ class ComplexityAnalysisOrchestratorSubmitIdempotencyTest {
                 confidenceModel,
                 leaseService,
                 benchmarkRunPersister,
-                new ObjectMapper());
+                new ObjectMapper(),
+                complexityMetrics);
     }
 
     @Test

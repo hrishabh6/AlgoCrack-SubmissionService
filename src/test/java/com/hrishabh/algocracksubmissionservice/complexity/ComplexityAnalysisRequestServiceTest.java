@@ -36,6 +36,9 @@ class ComplexityAnalysisRequestServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics complexityMetrics;
+
     private ComplexityAnalysisRequestService requestService;
 
     @BeforeEach
@@ -47,7 +50,8 @@ class ComplexityAnalysisRequestServiceTest {
                 accessService,
                 complexityAnalysisRepository,
                 new ComplexityAnalysisMapper(properties, new ComplexityAnalysisJsonSupport(new com.fasterxml.jackson.databind.ObjectMapper())),
-                eventPublisher);
+                eventPublisher,
+                complexityMetrics);
     }
 
     @Test

@@ -81,6 +81,45 @@ class ComplexityAnalysisV4FlywayIntegrationTest {
     }
 
     @Test
+    void v5ProfileExecutionIdColumnExists() throws SQLException {
+        try (Connection connection = connection();
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery(
+                     "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                             + "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complexity_analysis' "
+                             + "AND COLUMN_NAME = 'profile_execution_id'")) {
+            assertTrue(rs.next(), "profile_execution_id column missing after V5");
+        }
+    }
+
+    @Test
+    void v6BenchmarkCaseIdentityUniquePerAnalysis() throws SQLException {
+        String analysisId = "a-bench-" + System.nanoTime();
+        String submissionId = "sub-bench-" + System.nanoTime();
+        insertAnalysis(submissionId, analysisId, null, "COMPLETED");
+        String insertBench = """
+                INSERT INTO complexity_benchmark_run (
+                  analysis_id, case_id, case_identity, variant, size_vector_json, input_hash,
+                  sample_count, warmup_count, output_validated, outcome, created_at
+                ) VALUES (?, 'case-1', 'identity-1', 'default', '{}', 'abc', 1, 0, 1, 'SUCCESS', NOW(6))
+                """;
+        try (Connection connection = connection(); PreparedStatement ps = connection.prepareStatement(insertBench)) {
+            ps.setString(1, analysisId);
+            assertEquals(1, ps.executeUpdate());
+        }
+        String duplicateIdentity = """
+                INSERT INTO complexity_benchmark_run (
+                  analysis_id, case_id, case_identity, variant, size_vector_json, input_hash,
+                  sample_count, warmup_count, output_validated, outcome, created_at
+                ) VALUES (?, 'case-2', 'identity-1', 'default', '{}', 'def', 1, 0, 1, 'SUCCESS', NOW(6))
+                """;
+        try (Connection connection = connection(); PreparedStatement ps = connection.prepareStatement(duplicateIdentity)) {
+            ps.setString(1, analysisId);
+            assertThrows(SQLException.class, ps::executeUpdate);
+        }
+    }
+
+    @Test
     void terminalRowClearsActiveSlot() throws SQLException {
         String submissionId = "sub-terminal-" + System.nanoTime();
         insertAnalysis(submissionId, "a-term-1", 1, "QUEUED");

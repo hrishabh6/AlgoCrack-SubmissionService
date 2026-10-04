@@ -23,6 +23,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.dto.CxeComplexityProfi
 import com.hrishabh.algocracksubmissionservice.complexity.dto.CxeComplexityProfileDtos.QuestionMetadataDto;
 import com.hrishabh.algocracksubmissionservice.complexity.dto.CxeComplexityProfileDtos.SubmitRequest;
 import com.hrishabh.algocracksubmissionservice.complexity.dto.CxeComplexityProfileDtos.SubmitResponse;
+import com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics;
 import com.hrishabh.algocracksubmissionservice.complexity.inference.DynamicGrowthInferenceEngine;
 import com.hrishabh.algocracksubmissionservice.complexity.inference.DynamicGrowthInferenceResult;
 import com.hrishabh.algocracksubmissionservice.complexity.inference.GrowthCandidateFamily;
@@ -83,6 +84,7 @@ public class ComplexityAnalysisOrchestrator {
     private final ComplexityAnalysisLeaseService leaseService;
     private final ComplexityBenchmarkRunPersister benchmarkRunPersister;
     private final ObjectMapper objectMapper;
+    private final ComplexityMetrics complexityMetrics;
 
     public void advance(String analysisPublicId) {
         ComplexityAnalysis analysis = analysisRepository.findByAnalysisId(analysisPublicId).orElse(null);
@@ -229,6 +231,7 @@ public class ComplexityAnalysisOrchestrator {
             SubmitRequest request = buildSubmitRequest(analysis, executionId);
             profileClient.submit(request);
         } catch (CxeComplexityProfileTransportException ex) {
+            complexityMetrics.recordCxeTransportError("submit");
             log.warn("CXE profile submit transport failure analysisId={} executionId={}", analysisPublicId, executionId, ex);
         } catch (CxeComplexityProfileException ex) {
             finalizeWithBenchmarkLimitation(analysisPublicId, ex.getErrorCode());
@@ -285,6 +288,7 @@ public class ComplexityAnalysisOrchestrator {
         } catch (ProfileContractException ex) {
             finalizeWithBenchmarkLimitation(analysisPublicId, ex.getErrorCode());
         } catch (CxeComplexityProfileTransportException ex) {
+            complexityMetrics.recordCxeTransportError("poll");
             log.warn("CXE profile poll transport failure analysisId={} executionId={}", analysisPublicId, executionId, ex);
         } catch (CxeComplexityProfileException ex) {
             finalizeWithBenchmarkLimitation(analysisPublicId, ex.getErrorCode());
@@ -344,6 +348,12 @@ public class ComplexityAnalysisOrchestrator {
         analysis.setLeaseOwner(null);
         analysis.setLeaseExpiresAt(null);
         analysisRepository.save(analysis);
+        int ineligible = observations.size() - usableCount;
+        complexityMetrics.recordBenchmarkUsability(usableCount, ineligible);
+        complexityMetrics.recordInferenceOutcome(
+                dynamicFamily.name(),
+                dynamicFamily == GrowthCandidateFamily.INCONCLUSIVE ? "INCONCLUSIVE" : "RESOLVED");
+        recordCompletion(analysis, staticResult.resultKind().name());
     }
 
     private SubmitRequest buildSubmitRequest(ComplexityAnalysis analysis, String executionId) {
@@ -447,6 +457,7 @@ public class ComplexityAnalysisOrchestrator {
         analysis.setLeaseOwner(null);
         analysis.setLeaseExpiresAt(null);
         analysisRepository.save(analysis);
+        recordCompletion(analysis, analysis.getResultKind() != null ? analysis.getResultKind().name() : "STATIC_ONLY");
     }
 
     private void finalizeWithBenchmarkLimitation(String analysisPublicId, String code) {
@@ -480,6 +491,8 @@ public class ComplexityAnalysisOrchestrator {
         analysis.setLeaseOwner(null);
         analysis.setLeaseExpiresAt(null);
         analysisRepository.save(analysis);
+        complexityMetrics.recordBenchmarkLimitation(code);
+        recordCompletion(analysis, staticResult.resultKind().name());
     }
 
     private void applyStaticDraft(ComplexityAnalysis analysis, StaticAnalysisResult result) {
@@ -527,6 +540,14 @@ public class ComplexityAnalysisOrchestrator {
         target.setLeaseOwner(null);
         target.setLeaseExpiresAt(null);
         analysisRepository.save(target);
+        complexityMetrics.recordCacheReuse();
+        recordCompletion(target, target.getResultKind() != null ? target.getResultKind().name() : "UNKNOWN");
+    }
+
+    private void recordCompletion(ComplexityAnalysis analysis, String staticOutcome) {
+        complexityMetrics.recordCompleted(
+                analysis.getResultKind() != null ? analysis.getResultKind().name() : "UNKNOWN",
+                staticOutcome);
     }
 
     private boolean isCompatibleReuse(ComplexityAnalysis prior) {

@@ -1,6 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.complexity.service;
 
 import com.hrishabh.algocracksubmissionservice.complexity.config.ComplexityProperties;
+import com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityAnalysis;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityProcessingStatus;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityAnalysisRepository;
@@ -10,6 +11,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Component
@@ -29,9 +32,19 @@ public class ComplexityAnalysisWorker {
     private final ComplexityAnalysisRepository analysisRepository;
     private final ComplexityAnalysisOrchestrator orchestrator;
     private final ComplexityProperties properties;
+    private final ComplexityMetrics complexityMetrics;
 
     @Scheduled(fixedDelayString = "${complexity.worker-poll-ms:2000}")
     public void pollActiveAnalyses() {
+        complexityMetrics.recordQueuedDepth(
+                analysisRepository.countByActiveSlotIsNotNullAndStatusIn(ACTIVE_PIPELINE));
+        analysisRepository.findFirstByStatusInAndActiveSlotIsNotNullOrderByRequestedAtAsc(ACTIVE_PIPELINE)
+                .ifPresent(oldest -> {
+                    if (oldest.getRequestedAt() != null) {
+                        long ageSeconds = Duration.between(oldest.getRequestedAt(), LocalDateTime.now()).getSeconds();
+                        complexityMetrics.recordOldestQueuedAgeSeconds(ageSeconds);
+                    }
+                });
         List<ComplexityAnalysis> active = analysisRepository
                 .findTop10ByStatusInAndActiveSlotIsNotNullOrderByRequestedAtAsc(ACTIVE_PIPELINE);
         for (ComplexityAnalysis analysis : active) {

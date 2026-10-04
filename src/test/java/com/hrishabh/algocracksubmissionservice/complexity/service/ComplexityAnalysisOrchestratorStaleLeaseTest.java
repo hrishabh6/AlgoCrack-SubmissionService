@@ -55,6 +55,8 @@ class ComplexityAnalysisOrchestratorStaleLeaseTest {
     private ComplexityAnalysisLeaseService leaseService;
     @Mock
     private ComplexityBenchmarkRunPersister benchmarkRunPersister;
+    @Mock
+    private com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics complexityMetrics;
 
     private ComplexityAnalysisOrchestrator orchestrator;
 
@@ -80,7 +82,8 @@ class ComplexityAnalysisOrchestratorStaleLeaseTest {
                 confidenceModel,
                 leaseService,
                 benchmarkRunPersister,
-                new ObjectMapper());
+                new ObjectMapper(),
+                complexityMetrics);
     }
 
     @Test

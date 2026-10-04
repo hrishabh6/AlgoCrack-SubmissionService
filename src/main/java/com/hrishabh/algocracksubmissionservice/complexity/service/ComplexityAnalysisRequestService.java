@@ -1,6 +1,7 @@
 package com.hrishabh.algocracksubmissionservice.complexity.service;
 
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityAnalysisDtos.ComplexityAnalysisRequestResponse;
+import com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityAnalysis;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityProcessingStatus;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityAnalysisRepository;
@@ -23,6 +24,7 @@ public class ComplexityAnalysisRequestService {
     private final ComplexityAnalysisRepository complexityAnalysisRepository;
     private final ComplexityAnalysisMapper mapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final ComplexityMetrics complexityMetrics;
 
     @Transactional
     public ComplexityAnalysisRequestResponse requestAnalysis(String submissionPublicId, String userId) {
@@ -31,17 +33,20 @@ public class ComplexityAnalysisRequestService {
         var existingActive = complexityAnalysisRepository.findBySubmissionIdAndActiveSlot(
                 submission.getSubmissionId(), ComplexityAnalysis.ACTIVE_SLOT_VALUE);
         if (existingActive.isPresent()) {
+            complexityMetrics.recordAnalysisRequest(true);
             return mapper.toRequestResponse(existingActive.get(), true);
         }
 
         try {
             ComplexityAnalysis created = complexityAnalysisRepository.save(buildQueuedAnalysis(submission));
             eventPublisher.publishEvent(new ComplexityAnalysisAsyncTrigger.ComplexityAnalysisRequestedEvent(created.getAnalysisId()));
+            complexityMetrics.recordAnalysisRequest(false);
             return mapper.toRequestResponse(created, false);
         } catch (DataIntegrityViolationException ex) {
             ComplexityAnalysis active = complexityAnalysisRepository
                     .findBySubmissionIdAndActiveSlot(submission.getSubmissionId(), ComplexityAnalysis.ACTIVE_SLOT_VALUE)
                     .orElseThrow(() -> ex);
+            complexityMetrics.recordAnalysisRequest(true);
             return mapper.toRequestResponse(active, true);
         }
     }

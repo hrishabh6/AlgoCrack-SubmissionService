@@ -48,6 +48,15 @@ public interface ComplexityAnalysisRepository extends JpaRepository<ComplexityAn
     List<ComplexityAnalysis> findTop10ByStatusInAndActiveSlotIsNotNullOrderByRequestedAtAsc(
             List<ComplexityProcessingStatus> statuses);
 
+    @Query("""
+            SELECT COUNT(c) FROM ComplexityAnalysis c
+            WHERE c.activeSlot IS NOT NULL AND c.status IN :statuses
+            """)
+    long countByActiveSlotIsNotNullAndStatusIn(@Param("statuses") List<ComplexityProcessingStatus> statuses);
+
+    Optional<ComplexityAnalysis> findFirstByStatusInAndActiveSlotIsNotNullOrderByRequestedAtAsc(
+            List<ComplexityProcessingStatus> statuses);
+
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE ComplexityAnalysis c
