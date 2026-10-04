@@ -2,6 +2,8 @@ package com.hrishabh.algocracksubmissionservice.complexity.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -32,6 +34,7 @@ public class ComplexityBenchmarkRun {
     @Column(name = "profile_version", length = 32)
     private String profileVersion;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "profile_hash", length = 64)
     private String profileHash;
 
@@ -53,6 +56,7 @@ public class ComplexityBenchmarkRun {
     @Column
     private Long seed;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "input_hash", nullable = false, length = 64)
     private String inputHash;
 

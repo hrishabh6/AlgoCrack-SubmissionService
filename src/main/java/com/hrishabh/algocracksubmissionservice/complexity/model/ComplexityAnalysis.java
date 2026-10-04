@@ -2,6 +2,8 @@ package com.hrishabh.algocracksubmissionservice.complexity.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -51,6 +53,7 @@ public class ComplexityAnalysis {
     @Column(name = "result_kind", length = 32)
     private ComplexityResultKind resultKind;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "source_sha256", nullable = false, length = 64, updatable = false)
     private String sourceSha256;
 
@@ -75,6 +78,7 @@ public class ComplexityAnalysis {
     @Column(name = "profile_version", length = 32)
     private String profileVersion;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "profile_hash", length = 64)
     private String profileHash;
 
@@ -128,6 +132,7 @@ public class ComplexityAnalysis {
     @Column(name = "error_code", length = 64)
     private String errorCode;
 
+    @JdbcTypeCode(SqlTypes.TINYINT)
     @Column(name = "active_slot")
     private Integer activeSlot;
 
