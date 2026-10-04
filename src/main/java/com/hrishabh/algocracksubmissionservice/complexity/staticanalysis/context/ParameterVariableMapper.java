@@ -44,6 +44,10 @@ public final class ParameterVariableMapper {
         return variables;
     }
 
+    public static String symbolForParameter(String type, String paramName, int index) {
+        return symbolFor(type, paramName, index);
+    }
+
     private static String symbolFor(String type, String paramName, int index) {
         String normalized = type.toLowerCase(Locale.ROOT);
         if (normalized.contains("[]") || normalized.contains("list") || normalized.contains("string")) {

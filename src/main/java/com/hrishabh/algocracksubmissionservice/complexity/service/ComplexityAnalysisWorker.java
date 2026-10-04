@@ -12,6 +12,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * Polls QUEUED complexity analyses. Claiming uses {@code claimQueuedForStaticAnalysis} so multiple
+ * replicas do not process the same row; only one instance wins the atomic UPDATE per analysis.
+ */
 @Component
 @ConditionalOnProperty(prefix = "complexity", name = "static-analysis-enabled", havingValue = "true")
 @RequiredArgsConstructor

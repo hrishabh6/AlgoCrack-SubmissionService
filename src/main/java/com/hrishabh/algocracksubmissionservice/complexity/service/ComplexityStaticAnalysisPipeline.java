@@ -43,15 +43,22 @@ public class ComplexityStaticAnalysisPipeline {
             return false;
         }
         ComplexityAnalysis analysis = optional.get();
+        if (analysis.getStatus() == ComplexityProcessingStatus.COMPLETED) {
+            return false;
+        }
         if (analysis.getStatus() != ComplexityProcessingStatus.QUEUED || analysis.getActiveSlot() == null) {
             return false;
         }
 
-        analysis.setStatus(ComplexityProcessingStatus.STATIC_ANALYZING);
+        int claimed = analysisRepository.claimQueuedForStaticAnalysis(analysisPublicId);
+        if (claimed == 0) {
+            return false;
+        }
+        analysis = analysisRepository.findByAnalysisId(analysisPublicId).orElseThrow();
         if (analysis.getStartedAt() == null) {
             analysis.setStartedAt(LocalDateTime.now());
+            analysisRepository.save(analysis);
         }
-        analysisRepository.save(analysis);
 
         Submission submission = submissionRepository.findBySubmissionId(analysis.getSubmissionId())
                 .orElseThrow(() -> new IllegalStateException("Submission missing for analysis " + analysisPublicId));

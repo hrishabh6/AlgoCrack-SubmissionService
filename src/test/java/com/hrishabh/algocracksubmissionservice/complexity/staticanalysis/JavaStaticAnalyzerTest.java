@@ -62,8 +62,7 @@ class JavaStaticAnalyzerTest {
                   }
                 }
                 """, "solve", metadata("nums", "int[]"));
-        String bigO = ComplexityExprSimplifier.toBigOString(result.timeExpression());
-        assertTrue(bigO.equals("O(n^2)") || bigO.equals("O(n * n)"), () -> "unexpected " + bigO);
+        assertEquals("O(n²)", ComplexityExprSimplifier.toBigOString(result.timeExpression()));
     }
 
     @Test
@@ -80,7 +79,7 @@ class JavaStaticAnalyzerTest {
                 """, "solve", metadataTwoArray());
         assertTrue(result.variables().containsKey("n"));
         assertTrue(result.variables().containsKey("m"));
-        assertEquals("O(n)", ComplexityExprSimplifier.toBigOString(result.timeExpression()));
+        assertEquals("O(n + m)", ComplexityExprSimplifier.toBigOString(result.timeExpression()));
     }
 
     @Test

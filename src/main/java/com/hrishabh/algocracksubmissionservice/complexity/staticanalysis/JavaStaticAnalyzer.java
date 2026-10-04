@@ -2,6 +2,8 @@ package com.hrishabh.algocracksubmissionservice.complexity.staticanalysis;
 
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -13,8 +15,12 @@ import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResult
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.context.ParameterVariableMapper;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExprSimplifier;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallTarget;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallTargetResolver;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkKnowledgeBase;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkKnowledgeEntry;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.RecurrenceSupport;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.RecurrenceSupport.ArgumentPattern;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisResult;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticFindingDraft;
@@ -28,31 +34,42 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JavaStaticAnalyzer {
 
-    public static final String ANALYZER_VERSION = "static-v1";
+    public static final String ANALYZER_VERSION = "static-v1.2";
     public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v1";
 
     private final JdkKnowledgeBase knowledgeBase;
 
     public StaticAnalysisResult analyze(String source, QuestionMetadataApiDto metadata) {
+        return analyzeInternal(source, metadata, true);
+    }
+
+    /**
+     * Test/snippet helper — allows metadata-free entry resolution fallback. Not used in production pipeline.
+     */
+    public StaticAnalysisResult analyzeSnippet(String source, QuestionMetadataApiDto metadata) {
+        return analyzeInternal(source, metadata, false);
+    }
+
+    private StaticAnalysisResult analyzeInternal(String source, QuestionMetadataApiDto metadata, boolean requireMetadataEntry) {
         List<StaticFindingDraft> findings = new ArrayList<>();
         List<String> limitations = new ArrayList<>();
         try {
             CompilationUnit unit = StaticJavaParser.parse(source);
-            Optional<MethodDeclaration> entry = resolveEntryMethod(unit, metadata);
+            Optional<MethodDeclaration> entry = resolveEntryMethod(unit, metadata, requireMetadataEntry);
             if (entry.isEmpty()) {
                 return unsupported(findings, limitations, "ENTRY_METHOD_UNRESOLVED",
                         "Could not resolve entry method for complexity analysis");
             }
             MethodDeclaration entryMethod = entry.get();
             Map<String, String> variables = mergeVariables(metadata, entryMethod);
-            AnalysisState state = new AnalysisState(findings, limitations, variables, knowledgeBase);
+            AnalysisState state = new AnalysisState(findings, limitations, variables, knowledgeBase, unit, entryMethod, metadata);
 
             detectMutableStatic(unit, state);
 
             Map<String, MethodDeclaration> methodIndex = indexMethods(unit);
             Map<String, ComplexityExpr> memo = new HashMap<>();
             ComplexityExpr time = analyzeBlock(entryMethod.getBody().orElse(new BlockStmt()), state, methodIndex, memo, entryMethod.getNameAsString(), 0);
-            ComplexityExpr space = analyzeAuxiliarySpace(entryMethod, unit, state, methodIndex, memo);
+            ComplexityExpr space = analyzeAuxiliarySpacePeak(entryMethod, state, methodIndex, memo);
 
             ComplexityBoundBasis timeBasis = state.worstTimeBasis();
             ComplexityResultKind kind = classify(time, state);
@@ -144,21 +161,30 @@ public class JavaStaticAnalyzer {
         return variables;
     }
 
-    private static Optional<MethodDeclaration> resolveEntryMethod(CompilationUnit unit, QuestionMetadataApiDto metadata) {
+    private static Optional<MethodDeclaration> resolveEntryMethod(
+            CompilationUnit unit,
+            QuestionMetadataApiDto metadata,
+            boolean requireMetadataEntry) {
         List<ClassOrInterfaceDeclaration> types = unit.findAll(ClassOrInterfaceDeclaration.class);
         if (types.isEmpty()) {
             return Optional.empty();
         }
         String targetName = metadata != null ? metadata.getFunctionName() : null;
-        for (ClassOrInterfaceDeclaration type : types) {
-            for (MethodDeclaration method : type.getMethods()) {
-                if (method.isAbstract() || "main".equalsIgnoreCase(method.getNameAsString())) {
-                    continue;
-                }
-                if (targetName != null && targetName.equals(method.getNameAsString())) {
-                    return Optional.of(method);
+        if (requireMetadataEntry && (targetName == null || targetName.isBlank())) {
+            return Optional.empty();
+        }
+        if (targetName != null && !targetName.isBlank()) {
+            for (ClassOrInterfaceDeclaration type : types) {
+                for (MethodDeclaration method : type.getMethods()) {
+                    if (method.isAbstract() || "main".equalsIgnoreCase(method.getNameAsString())) {
+                        continue;
+                    }
+                    if (targetName.equals(method.getNameAsString())) {
+                        return Optional.of(method);
+                    }
                 }
             }
+            return Optional.empty();
         }
         for (ClassOrInterfaceDeclaration type : types) {
             Optional<MethodDeclaration> candidate = type.getMethods().stream()
@@ -236,7 +262,7 @@ public class JavaStaticAnalyzer {
                                 ? analyzeBlock(b, state, methodIndex, memo, currentMethod, depth)
                                 : analyzeStatement(s, state, methodIndex, memo, currentMethod, depth))
                         .orElse(ComplexityExpr.one());
-                yield branchMax(thenCost, elseCost);
+                yield ComplexityExprSimplifier.branchWorstCase(thenCost, elseCost);
             }
             case ForStmt forStmt -> analyzeForLoop(forStmt, state, methodIndex, memo, currentMethod, depth);
             case ForEachStmt forEach -> analyzeForEach(forEach, state, methodIndex, memo, currentMethod, depth);
@@ -333,11 +359,12 @@ public class JavaStaticAnalyzer {
 
     private ComplexityExpr mapIterableSize(Expression iterable, AnalysisState state) {
         if (iterable instanceof NameExpr name) {
-            return state.variables.containsKey("n")
-                    ? ComplexityExpr.var("n")
-                    : ComplexityExpr.var(name.getNameAsString());
+            return ComplexityExpr.var(state.mapNameToVariable(name.getNameAsString()));
         }
-        if (iterable instanceof FieldAccessExpr access && access.getNameAsString().equals("length")) {
+        if (iterable instanceof FieldAccessExpr access && "length".equals(access.getNameAsString())) {
+            if (access.getScope() instanceof NameExpr nameExpr) {
+                return ComplexityExpr.var(state.mapNameToVariable(nameExpr.getNameAsString()));
+            }
             return mapSizeExpression(access.getScope(), state).orElse(new ComplexityExpr.Unknown("length scope"));
         }
         return new ComplexityExpr.Unknown("iterable size");
@@ -350,7 +377,10 @@ public class JavaStaticAnalyzer {
         }
         if (expression instanceof FieldAccessExpr access) {
             if ("length".equals(access.getNameAsString())) {
-                return Optional.of(ComplexityExpr.var(state.primarySizeVariable()));
+                String scopeName = access.getScope() instanceof NameExpr nameExpr
+                        ? nameExpr.getNameAsString()
+                        : access.getScope().toString();
+                return Optional.of(ComplexityExpr.var(state.mapNameToVariable(scopeName)));
             }
         }
         if (expression instanceof MethodCallExpr call && "size".equals(call.getNameAsString())) {
@@ -414,8 +444,21 @@ public class JavaStaticAnalyzer {
         String methodName = call.getNameAsString();
         if (call.getScope().isEmpty() && methodIndex.containsKey(methodName)) {
             if (methodName.equals(currentMethod)) {
-                ComplexityExpr bodyCost = memo.getOrDefault(methodName, ComplexityExpr.one());
-                ComplexityExpr recurrence = analyzeRecurrence(call, state, bodyCost);
+                String recurrenceKey = currentMethod + "#recurrence";
+                if (!memo.containsKey(recurrenceKey)) {
+                    memo.put(recurrenceKey, new ComplexityExpr.Unknown("recurrence pending"));
+                    MethodDeclaration method = methodIndex.get(currentMethod);
+                    ComplexityExpr resolved = RecurrenceSupport.resolveMethodRecurrence(
+                            method,
+                            currentMethod,
+                            state.primarySizeVariable(),
+                            expr -> analyzeExpression(expr, state, methodIndex, memo, currentMethod));
+                    if (resolved instanceof ComplexityExpr.Unknown) {
+                        state.markOpaque("Recurrence pattern not supported");
+                    }
+                    memo.put(recurrenceKey, resolved);
+                }
+                ComplexityExpr recurrence = memo.get(recurrenceKey);
                 state.addFinding("RECURSION", call.getBegin().map(p -> p.line).orElse(null),
                         call.getEnd().map(p -> p.line).orElse(null),
                         ComplexityExprSimplifier.toExpressionString(recurrence), "MEDIUM",
@@ -427,10 +470,13 @@ public class JavaStaticAnalyzer {
                 return analyzeBlock(method.getBody().orElse(new BlockStmt()), state, methodIndex, memo, name, 0);
             });
         }
-        String scopeType = call.getScope()
-                .map(scope -> scope instanceof NameExpr n ? n.getNameAsString() : scope.toString())
-                .orElse("java.lang");
-        Optional<JdkKnowledgeEntry> jdk = knowledgeBase.match(scopeType, methodName);
+        Optional<JdkCallTarget> staticTarget = JdkCallTargetResolver.resolve(call, state.compilationUnit);
+        int argCount = call.getArguments().size();
+        Optional<JdkKnowledgeEntry> jdk = staticTarget.flatMap(t -> knowledgeBase.matchQualified(t, methodName, argCount));
+        if (jdk.isEmpty()) {
+            jdk = JdkCallTargetResolver.resolveInstanceCall(call, state.paramTypes, state.compilationUnit)
+                    .flatMap(t -> knowledgeBase.matchQualified(t, methodName, argCount));
+        }
         if (jdk.isPresent()) {
             JdkKnowledgeEntry entry = jdk.get();
             state.noteBasis(entry.boundBasis());
@@ -443,81 +489,158 @@ public class JavaStaticAnalyzer {
                     entry.note());
             return entry.timeExpression();
         }
-        state.markOpaque("Unresolved external call: " + scopeType + "." + methodName);
+        String scopeLabel = call.getScope().map(Object::toString).orElse("unknown");
+        state.markOpaque("Unresolved external call: " + scopeLabel + "." + methodName);
         state.addFinding("OPAQUE_CALL", call.getBegin().map(p -> p.line).orElse(null),
                 call.getEnd().map(p -> p.line).orElse(null), null, "LOW",
-                "Unresolved call " + scopeType + "." + methodName + " — not treated as O(1)");
+                "Unresolved call " + scopeLabel + "." + methodName + " — not treated as O(1)");
         return new ComplexityExpr.Unknown("opaque call");
     }
 
-    private ComplexityExpr analyzeRecurrence(MethodCallExpr call, AnalysisState state, ComplexityExpr bodyCost) {
-        if (call.getArguments().size() == 1) {
-            Expression arg = call.getArgument(0);
-            if (arg instanceof BinaryExpr binary
-                    && binary.getOperator() == BinaryExpr.Operator.MINUS
-                    && binary.getRight() instanceof IntegerLiteralExpr lit
-                    && "1".equals(lit.getValue())) {
-                return ComplexityExpr.var(state.primarySizeVariable());
-            }
-            if (arg instanceof BinaryExpr divide
-                    && divide.getOperator() == BinaryExpr.Operator.DIVIDE
-                    && divide.getRight() instanceof IntegerLiteralExpr divLit
-                    && "2".equals(divLit.getValue())) {
-                String v = state.primarySizeVariable();
-                ComplexityExpr logFactor = new ComplexityExpr.Log(new ComplexityExpr.Variable(v));
-                return new ComplexityExpr.Product(List.of(logFactor, bodyCost));
-            }
-        }
-        return new ComplexityExpr.Unknown("unresolved recursion");
-    }
-
-    private ComplexityExpr analyzeAuxiliarySpace(
+    private ComplexityExpr analyzeAuxiliarySpacePeak(
             MethodDeclaration entryMethod,
-            CompilationUnit unit,
             AnalysisState state,
             Map<String, MethodDeclaration> methodIndex,
             Map<String, ComplexityExpr> memo) {
-        List<ComplexityExpr> allocations = new ArrayList<>();
-        entryMethod.walk(ArrayCreationExpr.class, array -> {
-            if (!array.getLevels().isEmpty() && array.getLevels().get(0).getDimension().isPresent()) {
-                allocations.add(analyzeExpression(
-                        array.getLevels().get(0).getDimension().get(),
-                        state, methodIndex, memo, entryMethod.getNameAsString()));
-            }
-        });
-        entryMethod.walk(ObjectCreationExpr.class, creation -> {
-            if (creation.getArguments().isEmpty()) {
-                allocations.add(ComplexityExpr.one());
-            } else {
-                allocations.add(analyzeExpression(
-                        creation.getArguments().get(0), state, methodIndex, memo, entryMethod.getNameAsString()));
-            }
-        });
-        ComplexityExpr recursionStack = unit.findAll(MethodCallExpr.class).stream()
-                .filter(call -> call.getNameAsString().equals(entryMethod.getNameAsString()))
-                .findFirst()
-                .map(call -> ComplexityExpr.var(state.primarySizeVariable()))
-                .orElse(ComplexityExpr.one());
+        ComplexityExpr allocationPeak = analyzeBlockSpacePeak(
+                entryMethod.getBody().orElse(new BlockStmt()), state, methodIndex, memo, entryMethod.getNameAsString(), false);
 
-        List<ComplexityExpr> terms = new ArrayList<>(allocations);
-        terms.add(recursionStack);
-        if (terms.isEmpty()) {
-            return ComplexityExpr.one();
+        ArgumentPattern stackPattern = RecurrenceSupport.unifiedStackPattern(
+                entryMethod, entryMethod.getNameAsString());
+
+        ComplexityExpr stack = RecurrenceSupport.recursionStackDepth(stackPattern, state.primarySizeVariable());
+        if (stackPattern == ArgumentPattern.UNSUPPORTED
+                && !RecurrenceSupport.directSelfCalls(entryMethod, entryMethod.getNameAsString()).isEmpty()) {
+            stack = new ComplexityExpr.Unknown("recursion stack depth unknown");
         }
-        return terms.stream()
-                .reduce((a, b) -> new ComplexityExpr.Sum(List.of(a, b)))
-                .map(ComplexityExprSimplifier::simplify)
-                .orElse(ComplexityExpr.one());
+
+        return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(allocationPeak, stack)));
     }
 
-    private static ComplexityExpr branchMax(ComplexityExpr left, ComplexityExpr right) {
-        if (left instanceof ComplexityExpr.Unknown) {
-            return right;
+    private ComplexityExpr analyzeBlockSpacePeak(
+            BlockStmt block,
+            AnalysisState state,
+            Map<String, MethodDeclaration> methodIndex,
+            Map<String, ComplexityExpr> memo,
+            String currentMethod,
+            boolean disjointNestedScope) {
+        ComplexityExpr scopeLive = ComplexityExpr.one();
+        ComplexityExpr nestedDisjointPeak = ComplexityExpr.one();
+        for (Statement statement : block.getStatements()) {
+            if (statement instanceof ExpressionStmt exprStmt && exprStmt.getExpression() instanceof VariableDeclarationExpr varDecl) {
+                for (var variable : varDecl.getVariables()) {
+                    if (variable.getInitializer().isPresent()) {
+                        ComplexityExpr alloc = allocationSize(
+                                variable.getInitializer().get(), state, methodIndex, memo, currentMethod);
+                        scopeLive = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeLive, alloc)));
+                    }
+                }
+                continue;
+            }
+            ComplexityExpr stmtPeak = analyzeStatementSpacePeak(
+                    statement, state, methodIndex, memo, currentMethod, disjointNestedScope);
+            nestedDisjointPeak = ComplexityExprSimplifier.branchWorstCase(nestedDisjointPeak, stmtPeak);
         }
-        if (right instanceof ComplexityExpr.Unknown) {
-            return left;
+        if (disjointNestedScope) {
+            return ComplexityExprSimplifier.branchWorstCase(scopeLive, nestedDisjointPeak);
         }
-        return ComplexityExprSimplifier.rank(left) >= ComplexityExprSimplifier.rank(right) ? left : right;
+        return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeLive, nestedDisjointPeak)));
+    }
+
+    private ComplexityExpr analyzeStatementSpacePeak(
+            Statement statement,
+            AnalysisState state,
+            Map<String, MethodDeclaration> methodIndex,
+            Map<String, ComplexityExpr> memo,
+            String currentMethod,
+            boolean parentScope) {
+        return switch (statement) {
+            case BlockStmt block -> analyzeBlockSpacePeak(block, state, methodIndex, memo, currentMethod, true);
+            case ForStmt forStmt -> {
+                ComplexityExpr body = forStmt.getBody() instanceof BlockStmt b
+                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, currentMethod, true)
+                        : analyzeStatementSpacePeak(forStmt.getBody(), state, methodIndex, memo, currentMethod, parentScope);
+                yield body;
+            }
+            case ForEachStmt forEach -> {
+                ComplexityExpr body = forEach.getBody() instanceof BlockStmt b
+                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, currentMethod, true)
+                        : analyzeStatementSpacePeak(forEach.getBody(), state, methodIndex, memo, currentMethod, parentScope);
+                yield body;
+            }
+            case WhileStmt whileStmt -> {
+                ComplexityExpr body = whileStmt.getBody() instanceof BlockStmt b
+                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, currentMethod, true)
+                        : analyzeStatementSpacePeak(whileStmt.getBody(), state, methodIndex, memo, currentMethod, parentScope);
+                yield body;
+            }
+            case ReturnStmt returnStmt -> returnStmt.getExpression()
+                    .map(expr -> allocationSize(expr, state, methodIndex, memo, currentMethod))
+                    .orElse(ComplexityExpr.one());
+            case ExpressionStmt expressionStmt -> expressionStmt.getExpression() == null
+                    ? ComplexityExpr.one()
+                    : allocationSize(expressionStmt.getExpression(), state, methodIndex, memo, currentMethod);
+            case IfStmt ifStmt -> {
+                ComplexityExpr thenPeak = ifStmt.getThenStmt() instanceof BlockStmt b
+                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, currentMethod, true)
+                        : analyzeStatementSpacePeak(ifStmt.getThenStmt(), state, methodIndex, memo, currentMethod, parentScope);
+                ComplexityExpr elsePeak = ifStmt.getElseStmt()
+                        .map(s -> s instanceof BlockStmt b
+                                ? analyzeBlockSpacePeak(b, state, methodIndex, memo, currentMethod, true)
+                                : analyzeStatementSpacePeak(s, state, methodIndex, memo, currentMethod, parentScope))
+                        .orElse(ComplexityExpr.one());
+                yield ComplexityExprSimplifier.branchWorstCase(thenPeak, elsePeak);
+            }
+            default -> ComplexityExpr.one();
+        };
+    }
+
+    private ComplexityExpr allocationSize(
+            Expression expression,
+            AnalysisState state,
+            Map<String, MethodDeclaration> methodIndex,
+            Map<String, ComplexityExpr> memo,
+            String currentMethod) {
+        if (expression instanceof ArrayCreationExpr array && !array.getLevels().isEmpty()
+                && array.getLevels().get(0).getDimension().isPresent()) {
+            return analyzeExpression(
+                    array.getLevels().get(0).getDimension().get(), state, methodIndex, memo, currentMethod);
+        }
+        if (expression instanceof ObjectCreationExpr creation) {
+            if (creation.getArguments().isEmpty()) {
+                return ComplexityExpr.one();
+            }
+            return analyzeExpression(creation.getArguments().get(0), state, methodIndex, memo, currentMethod);
+        }
+        return ComplexityExpr.one();
+    }
+
+    private static Map<String, String> buildDeclaredTypes(CompilationUnit unit, MethodDeclaration entryMethod) {
+        Map<String, String> types = new HashMap<>();
+        for (Parameter param : entryMethod.getParameters()) {
+            types.put(param.getNameAsString(), resolveTypeName(unit, param.getType().asString()));
+        }
+        return types;
+    }
+
+    private static String resolveTypeName(CompilationUnit unit, String typeName) {
+        String base = typeName.trim();
+        if (base.contains("<")) {
+            base = base.substring(0, base.indexOf('<'));
+        }
+        if (base.contains(".")) {
+            return base;
+        }
+        for (ImportDeclaration importDeclaration : unit.getImports()) {
+            if (importDeclaration.isStatic()) {
+                continue;
+            }
+            String imported = importDeclaration.getNameAsString();
+            if (imported.endsWith("." + base)) {
+                return imported;
+            }
+        }
+        return base;
     }
 
     private static String safeMessage(String message) {
@@ -528,16 +651,27 @@ public class JavaStaticAnalyzer {
         final List<StaticFindingDraft> findings;
         final List<String> limitations;
         final Map<String, String> variables;
-        private final JdkKnowledgeBase knowledgeBase;
+        final CompilationUnit compilationUnit;
+        final Map<String, String> paramTypes;
+        final Map<String, String> paramNameToSymbol;
         private boolean opaque;
         private boolean unknownLoop;
         private ComplexityBoundBasis worstBasis = ComplexityBoundBasis.WORST_CASE;
 
-        AnalysisState(List<StaticFindingDraft> findings, List<String> limitations, Map<String, String> variables, JdkKnowledgeBase knowledgeBase) {
+        AnalysisState(
+                List<StaticFindingDraft> findings,
+                List<String> limitations,
+                Map<String, String> variables,
+                JdkKnowledgeBase knowledgeBase,
+                CompilationUnit compilationUnit,
+                MethodDeclaration entryMethod,
+                QuestionMetadataApiDto metadata) {
             this.findings = findings;
             this.limitations = limitations;
             this.variables = variables;
-            this.knowledgeBase = knowledgeBase;
+            this.compilationUnit = compilationUnit;
+            this.paramTypes = buildDeclaredTypes(compilationUnit, entryMethod);
+            this.paramNameToSymbol = buildParamNameToSymbol(metadata, entryMethod);
         }
 
         void addFinding(String category, Integer start, Integer end, String expression, String certainty, String summary) {
@@ -584,10 +718,32 @@ public class JavaStaticAnalyzer {
         }
 
         String mapNameToVariable(String name) {
+            if (paramNameToSymbol.containsKey(name)) {
+                return paramNameToSymbol.get(name);
+            }
             if (variables.containsKey(name)) {
                 return name;
             }
             return primarySizeVariable();
         }
+    }
+
+    private static Map<String, String> buildParamNameToSymbol(QuestionMetadataApiDto metadata, MethodDeclaration entryMethod) {
+        Map<String, String> mapping = new HashMap<>();
+        if (metadata != null && metadata.getParamNames() != null && metadata.getParamTypes() != null) {
+            List<String> names = metadata.getParamNames();
+            List<String> types = metadata.getParamTypes();
+            for (int i = 0; i < names.size() && i < types.size(); i++) {
+                mapping.put(names.get(i), ParameterVariableMapper.symbolForParameter(types.get(i), names.get(i), i));
+            }
+            return mapping;
+        }
+        List<Parameter> parameters = entryMethod.getParameters();
+        for (int i = 0; i < parameters.size(); i++) {
+            Parameter parameter = parameters.get(i);
+            mapping.put(parameter.getNameAsString(),
+                    ParameterVariableMapper.symbolForParameter(parameter.getType().asString(), parameter.getNameAsString(), i));
+        }
+        return mapping;
     }
 }

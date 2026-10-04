@@ -12,6 +12,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowled
 import com.hrishabh.algocracksubmissionservice.models.Submission;
 import com.hrishabh.algocracksubmissionservice.models.SubmissionStatus;
 import com.hrishabh.algocracksubmissionservice.models.SubmissionVerdict;
+import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -76,7 +78,13 @@ class ComplexityStaticAnalysisPipelineTest {
                 .build();
 
         when(analysisRepository.findByAnalysisId("a-1")).thenReturn(Optional.of(analysis));
+        when(analysisRepository.claimQueuedForStaticAnalysis("a-1")).thenReturn(1);
         when(submissionRepository.findBySubmissionId("sub-1")).thenReturn(Optional.of(submission));
+        when(problemServiceClient.getMetadata(1L, "JAVA")).thenReturn(QuestionMetadataApiDto.builder()
+                .functionName("solve")
+                .paramNames(List.of())
+                .paramTypes(List.of())
+                .build());
         when(analysisRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertTrue(pipeline.processQueuedAnalysis("a-1"));

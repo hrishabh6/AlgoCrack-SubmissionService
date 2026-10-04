@@ -10,5 +10,9 @@ public record JdkKnowledgeEntry(
         ComplexityExpr timeExpression,
         ComplexityExpr allocationExpression,
         String assumptions,
-        String note) {
+        String note,
+        /**
+         * Required argument count at call site, or -1 when any count is safe for this entry.
+         */
+        int requiredArgumentCount) {
 }

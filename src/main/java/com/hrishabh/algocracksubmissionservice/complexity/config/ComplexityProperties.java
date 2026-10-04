@@ -20,6 +20,7 @@ public class ComplexityProperties {
 
     /**
      * Runs deterministic static analysis worker (Phase 2). Dynamic profiling remains off.
+     * Safe with multiple service replicas when {@code claimQueuedForStaticAnalysis} is used (Phase 2 hardening).
      */
     private boolean staticAnalysisEnabled = false;
 
