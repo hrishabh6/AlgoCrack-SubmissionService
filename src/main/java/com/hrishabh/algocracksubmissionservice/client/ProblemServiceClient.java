@@ -32,12 +32,15 @@ public class ProblemServiceClient {
 
     private final RestTemplate restTemplate;
     private final String problemServiceUrl;
+    private final String internalServiceToken;
 
     public ProblemServiceClient(
             RestTemplate restTemplate,
-            @Value("${services.problem.base-url}") String problemServiceUrl) {
+            @Value("${services.problem.base-url}") String problemServiceUrl,
+            @Value("${services.problem.internal-service-token:}") String internalServiceToken) {
         this.restTemplate = restTemplate;
         this.problemServiceUrl = problemServiceUrl;
+        this.internalServiceToken = internalServiceToken;
     }
 
     /**
@@ -71,9 +74,10 @@ public class ProblemServiceClient {
      * Replaces: ReferenceSolutionRepository.findByQuestionId()
      */
     public ReferenceSolutionDto getOracle(Long questionId) {
-        String url = problemServiceUrl + "/api/v1/questions/" + questionId + "/reference-solution";
-        log.debug("Fetching oracle from: {}", url);
-        return restTemplate.getForObject(url, ReferenceSolutionDto.class);
+        String url = problemServiceUrl + "/api/v1/internal/questions/" + questionId + "/reference-solution";
+        log.debug("Fetching oracle from internal endpoint: {}", url);
+        return restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), ReferenceSolutionDto.class)
+                .getBody();
     }
 
     public RankMetadataBatchResponse fetchRankMetadataBatch(List<Long> questionIds) {
@@ -95,10 +99,13 @@ public class ProblemServiceClient {
                 .getBody();
     }
 
-    private static HttpHeaders internalHeaders() {
+    private HttpHeaders internalHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set(CurrentUser.INTERNAL_CALL_HEADER, "true");
+        if (internalServiceToken != null && !internalServiceToken.isBlank()) {
+            headers.set("X-Internal-Service-Token", internalServiceToken);
+        }
         return headers;
     }
 }

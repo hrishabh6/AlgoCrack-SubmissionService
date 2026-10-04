@@ -83,3 +83,4 @@ logging:
 services:
   problem:
     base-url: ${PROBLEM_SERVICE_URL:http://problem-service:8084}
+    internal-service-token: ${INTERNAL_SERVICE_TOKEN:}
