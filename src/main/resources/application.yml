@@ -55,6 +55,13 @@ playground:
   run-enabled: ${PLAYGROUND_RUN_ENABLED:false}
   guard-cleanup-ms: ${PLAYGROUND_GUARD_CLEANUP_MS:300000}
 
+complexity:
+  api-enabled: ${COMPLEXITY_API_ENABLED:false}
+  static-analysis-enabled: ${COMPLEXITY_STATIC_ANALYSIS_ENABLED:false}
+  max-page-size: ${COMPLEXITY_MAX_PAGE_SIZE:20}
+  poll-after-ms: ${COMPLEXITY_POLL_AFTER_MS:1000}
+  worker-poll-ms: ${COMPLEXITY_WORKER_POLL_MS:2000}
+
 # Code Execution Service Configuration
 cxe:
   service:

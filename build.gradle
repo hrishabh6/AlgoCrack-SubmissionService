@@ -40,6 +40,8 @@ dependencies {
     runtimeOnly 'com.mysql:mysql-connector-j'
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-mysql'
+    implementation 'com.github.javaparser:javaparser-core:3.26.3'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
     
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
     annotationProcessor 'org.projectlombok:lombok'
