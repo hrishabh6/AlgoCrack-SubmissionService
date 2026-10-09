@@ -698,6 +698,14 @@ public class JavaStaticAnalyzer {
                     "Object allocation " + creation.getType().getNameAsString());
             return size;
         }
+        if (expression instanceof ArrayInitializerExpr initializer) {
+            ComplexityExpr total = ComplexityExpr.one();
+            for (Expression value : initializer.getValues()) {
+                total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
+                        total, analyzeExpression(value, state, ipc, currentMethod))));
+            }
+            return total;
+        }
         if (expression instanceof ArrayCreationExpr arrayCreation && !arrayCreation.getLevels().isEmpty()) {
             ComplexityExpr magnitude = arrayAllocationMagnitude(
                     arrayCreation, state, ipc, currentMethod);
@@ -705,6 +713,12 @@ public class JavaStaticAnalyzer {
                     arrayCreation.getEnd().map(p -> p.line).orElse(null),
                     ComplexityExprSimplifier.toExpressionString(magnitude), "MEDIUM", "Array allocation");
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(magnitude, ComplexityExpr.one())));
+        }
+        if (expression instanceof LambdaExpr lambda) {
+            if (AnalysisState.isShallowComparator(lambda)) {
+                return ComplexityExpr.one();
+            }
+            return unsupportedExpression(expression, state);
         }
         if (expression instanceof CastExpr cast) {
             return analyzeExpression(cast.getExpression(), state, ipc, currentMethod);
@@ -847,13 +861,21 @@ public class JavaStaticAnalyzer {
             return Optional.of(new JdkBoundCall(jdkEntry,
                     new ComplexityExpr.Unknown("jdk comparator cost unresolved"), ComplexityExpr.one()));
         }
-        JdkCallSiteBinder.BindResult bound = JdkCallSiteBinder.bind(
-                jdkEntry,
-                call,
-                resolvedTarget,
-                expr -> mapSizeExpression(expr, state),
-                expr -> state.resolveJdkReceiverCardinality(expr),
-                state.documentedSymbolKeys());
+        JdkCallSiteBinder.BindResult bound = bindJdkCall(jdkEntry, call, resolvedTarget, state);
+        if (!bound.success()
+                && bound.failureKind() == JdkCallSiteBinder.FailureKind.CARDINALITY_UNRESOLVED
+                && call.getScope().isPresent()
+                && call.getScope().get() instanceof NameExpr receiver) {
+            Optional<WorklistStructuralProof.Proof> known = provenWorklistFor(call, receiver.getNameAsString(), state);
+            if (known.isPresent() && !state.structuralCardinality.containsKey(receiver.getNameAsString())) {
+                state.structuralCardinality.put(receiver.getNameAsString(), known.get().universe());
+                try {
+                    bound = bindJdkCall(jdkEntry, call, resolvedTarget, state);
+                } finally {
+                    state.structuralCardinality.remove(receiver.getNameAsString());
+                }
+            }
+        }
         if (!bound.success()) {
             StaticAnalysisReasonCode code = switch (bound.failureKind()) {
                 case CARDINALITY_UNRESOLVED -> StaticAnalysisReasonCode.JDK_CARDINALITY_UNRESOLVED;
@@ -865,6 +887,36 @@ public class JavaStaticAnalyzer {
                     new ComplexityExpr.Unknown("jdk call-site bind failed"), ComplexityExpr.one()));
         }
         return Optional.of(new JdkBoundCall(jdkEntry, bound.time(), bound.allocation()));
+    }
+
+    private JdkCallSiteBinder.BindResult bindJdkCall(
+            JdkKnowledgeEntry jdkEntry,
+            MethodCallExpr call,
+            JdkCallTarget resolvedTarget,
+            AnalysisState state) {
+        return JdkCallSiteBinder.bind(
+                jdkEntry,
+                call,
+                resolvedTarget,
+                expr -> mapSizeExpression(expr, state),
+                expr -> state.resolveJdkReceiverCardinality(expr),
+                state.documentedSymbolKeys());
+    }
+
+    private Optional<WorklistStructuralProof.Proof> provenWorklistFor(
+            MethodCallExpr call, String container, AnalysisState state) {
+        Optional<com.github.javaparser.ast.body.MethodDeclaration> method =
+                call.findAncestor(com.github.javaparser.ast.body.MethodDeclaration.class);
+        if (method.isEmpty()) {
+            return Optional.empty();
+        }
+        for (WhileStmt loop : method.get().findAll(WhileStmt.class)) {
+            WorklistStructuralProof.Attempt attempt = WorklistStructuralProof.attempt(loop, worklistLookup(state));
+            if (attempt.proof().isPresent() && container.equals(attempt.proof().get().containerName())) {
+                return attempt.proof();
+            }
+        }
+        return Optional.empty();
     }
 
     private static boolean isNonTrivialJdkAllocation(ComplexityExpr allocation) {

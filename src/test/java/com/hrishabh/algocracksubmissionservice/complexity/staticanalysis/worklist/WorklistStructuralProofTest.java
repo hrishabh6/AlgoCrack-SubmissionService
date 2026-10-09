@@ -61,7 +61,7 @@ class WorklistStructuralProofTest {
                 }
                 """);
         WorklistStructuralProof.Attempt attempt = WorklistStructuralProof.attempt(loop, lookup());
-        assertEquals(StaticAnalysisReasonCode.WORKLIST_ADMISSION_NOT_BOUNDED, attempt.failure());
+        assertEquals(StaticAnalysisReasonCode.WORKLIST_DUPLICATE_ADMISSION_POSSIBLE, attempt.failure());
     }
 
     @Test

@@ -88,7 +88,14 @@ public final class WorklistStructuralProof {
         }
         Optional<Admission> admission = findAdmission(body, containerName);
         if (admission.isEmpty()) {
-            return Attempt.failed(StaticAnalysisReasonCode.WORKLIST_ADMISSION_NOT_BOUNDED);
+            if (hasMismatchedAdmission(body, containerName)) {
+                return Attempt.failed(StaticAnalysisReasonCode.ADMISSION_STATE_IDENTITY_UNRESOLVED);
+            }
+            boolean offers = body.findAll(MethodCallExpr.class).stream()
+                    .anyMatch(call -> isContainerCall(call, containerName, ADMIT));
+            return Attempt.failed(offers
+                    ? StaticAnalysisReasonCode.WORKLIST_DUPLICATE_ADMISSION_POSSIBLE
+                    : StaticAnalysisReasonCode.WORKLIST_ADMISSION_NOT_BOUNDED);
         }
         Admission guard = admission.get();
         if (!offersMatchAdmission(body, containerName, guard)) {
@@ -202,6 +209,28 @@ public final class WorklistStructuralProof {
             }
         }
         return Optional.empty();
+    }
+
+    private static boolean hasMismatchedAdmission(BlockStmt body, String container) {
+        for (IfStmt ifStmt : body.findAll(IfStmt.class)) {
+            Optional<ArrayAccessExpr> guard = negatedMarker(ifStmt.getCondition());
+            if (guard.isEmpty()) {
+                continue;
+            }
+            Optional<String> marker = markerBase(guard.get());
+            if (marker.isEmpty() || !assignsTrue(ifStmt.getThenStmt(), marker.get(), indexTexts(guard.get()))) {
+                continue;
+            }
+            List<String> indices = indexTexts(guard.get());
+            boolean offer = ifStmt.getThenStmt().findAll(MethodCallExpr.class).stream()
+                    .anyMatch(call -> isContainerCall(call, container, ADMIT));
+            boolean matched = ifStmt.getThenStmt().findAll(MethodCallExpr.class).stream()
+                    .anyMatch(call -> isContainerCall(call, container, ADMIT) && coversIndices(call, indices));
+            if (offer && !matched) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean offersMatchAdmission(BlockStmt body, String container, Admission guard) {
