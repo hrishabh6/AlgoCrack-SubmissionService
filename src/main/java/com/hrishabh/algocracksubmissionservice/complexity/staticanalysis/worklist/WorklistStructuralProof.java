@@ -14,11 +14,18 @@ import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.UnaryExpr;
+import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.BreakStmt;
+import com.github.javaparser.ast.stmt.ContinueStmt;
+import com.github.javaparser.ast.stmt.DoStmt;
+import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ForEachStmt;
 import com.github.javaparser.ast.stmt.ForStmt;
 import com.github.javaparser.ast.stmt.IfStmt;
+import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.ast.stmt.Statement;
+import com.github.javaparser.ast.stmt.ThrowStmt;
 import com.github.javaparser.ast.stmt.WhileStmt;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExprSimplifier;
@@ -80,7 +87,7 @@ public final class WorklistStructuralProof {
         if (!(loop.getBody() instanceof BlockStmt body)) {
             return Attempt.failed(StaticAnalysisReasonCode.WORKLIST_CONSUMPTION_NOT_PROVEN);
         }
-        if (!unconditionalConsumption(body, containerName)) {
+        if (!continuingPathsConsume(loop, body, containerName)) {
             return Attempt.failed(StaticAnalysisReasonCode.WORKLIST_CONSUMPTION_NOT_PROVEN);
         }
         if (opaqueMutation(body, containerName)) {
@@ -150,21 +157,120 @@ public final class WorklistStructuralProof {
         return Optional.empty();
     }
 
-    private static boolean unconditionalConsumption(BlockStmt body, String container) {
-        for (Statement statement : body.getStatements()) {
-            if (statement instanceof IfStmt) {
+    /**
+     * Every path that returns to {@code loop}'s condition must have removed an element.
+     * Break, return, and throw leave the loop, so they do not need to consume.
+     */
+    private static boolean continuingPathsConsume(WhileStmt loop, BlockStmt body, String container) {
+        return switch (flowOfSequence(loop, body.getStatements(), container)) {
+            case CONSUMED, TERMINAL -> true;
+            case OPEN, UNSAFE -> false;
+        };
+    }
+
+    private enum Flow {
+        UNSAFE,
+        TERMINAL,
+        CONSUMED,
+        OPEN
+    }
+
+    private static Flow flowOfSequence(WhileStmt loop, List<Statement> statements, String container) {
+        boolean consumed = false;
+        for (Statement statement : statements) {
+            Flow flow = flowOf(loop, statement, container);
+            if (consumed) {
+                if (flow == Flow.TERMINAL) {
+                    return Flow.TERMINAL;
+                }
                 continue;
             }
-            if (containsConsumeCall(statement, container)) {
-                return true;
+            switch (flow) {
+                case UNSAFE -> {
+                    return Flow.UNSAFE;
+                }
+                case TERMINAL -> {
+                    return Flow.TERMINAL;
+                }
+                case CONSUMED -> consumed = true;
+                case OPEN -> {
+                }
+            }
+        }
+        return consumed ? Flow.CONSUMED : Flow.OPEN;
+    }
+
+    private static Flow flowOf(WhileStmt loop, Statement statement, String container) {
+        if (statement instanceof ContinueStmt continueStmt) {
+            return targetsWorklist(continueStmt, loop) ? Flow.UNSAFE : Flow.OPEN;
+        }
+        if (statement instanceof BreakStmt || statement instanceof ReturnStmt || statement instanceof ThrowStmt) {
+            return Flow.TERMINAL;
+        }
+        if (statement instanceof BlockStmt block) {
+            return flowOfSequence(loop, block.getStatements(), container);
+        }
+        if (statement instanceof IfStmt ifStmt) {
+            Flow thenFlow = flowOf(loop, ifStmt.getThenStmt(), container);
+            Flow elseFlow = ifStmt.getElseStmt().map(elseStmt -> flowOf(loop, elseStmt, container)).orElse(Flow.OPEN);
+            return joinFlows(thenFlow, elseFlow);
+        }
+        if (statementConsumes(statement, container)) {
+            return Flow.CONSUMED;
+        }
+        if (statement.findAll(ContinueStmt.class).stream().anyMatch(continueStmt -> targetsWorklist(continueStmt, loop))) {
+            return Flow.UNSAFE;
+        }
+        return Flow.OPEN;
+    }
+
+    private static Flow joinFlows(Flow left, Flow right) {
+        if (left == Flow.UNSAFE || right == Flow.UNSAFE) {
+            return Flow.UNSAFE;
+        }
+        if (left == Flow.TERMINAL) {
+            return right;
+        }
+        if (right == Flow.TERMINAL) {
+            return left;
+        }
+        if (left == Flow.CONSUMED && right == Flow.CONSUMED) {
+            return Flow.CONSUMED;
+        }
+        return Flow.OPEN;
+    }
+
+    private static boolean targetsWorklist(ContinueStmt continueStmt, WhileStmt loop) {
+        Node current = continueStmt;
+        while (current.getParentNode().isPresent()) {
+            current = current.getParentNode().get();
+            if (current instanceof ForStmt || current instanceof ForEachStmt || current instanceof DoStmt) {
+                return false;
+            }
+            if (current instanceof WhileStmt whileStmt) {
+                return whileStmt == loop;
             }
         }
         return false;
     }
 
-    private static boolean containsConsumeCall(Node node, String container) {
-        return node.findAll(MethodCallExpr.class).stream().anyMatch(call -> isContainerCall(call, container, CONSUME)
-                && call.getArguments().isEmpty());
+    private static boolean statementConsumes(Statement statement, String container) {
+        if (!(statement instanceof ExpressionStmt expressionStmt)) {
+            return false;
+        }
+        Expression expression = expressionStmt.getExpression();
+        if (expression instanceof VariableDeclarationExpr declaration) {
+            return declaration.getVariables().stream()
+                    .anyMatch(variable -> variable.getInitializer().isPresent()
+                            && isDirectConsume(variable.getInitializer().get(), container));
+        }
+        return isDirectConsume(expression, container);
+    }
+
+    private static boolean isDirectConsume(Expression expression, String container) {
+        return expression instanceof MethodCallExpr call
+                && isContainerCall(call, container, CONSUME)
+                && call.getArguments().isEmpty();
     }
 
     private static boolean opaqueMutation(Node node, String name) {

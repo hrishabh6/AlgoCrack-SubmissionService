@@ -65,6 +65,86 @@ class WorklistStructuralProofTest {
     }
 
     @Test
+    void continueBeforePollDoesNotProveConsumption() {
+        WhileStmt loop = onlyWhile("""
+                class Solution {
+                  public int solve(int n, boolean flag) {
+                    java.util.ArrayDeque<Integer> q = new java.util.ArrayDeque<>();
+                    q.offer(0);
+                    while (!q.isEmpty()) {
+                      if (flag) {
+                        continue;
+                      }
+                      int x = q.poll();
+                    }
+                    return 0;
+                  }
+                }
+                """);
+        WorklistStructuralProof.Attempt attempt = WorklistStructuralProof.attempt(loop, lookup());
+        assertEquals(StaticAnalysisReasonCode.WORKLIST_CONSUMPTION_NOT_PROVEN, attempt.failure());
+    }
+
+    @Test
+    void breakBeforePollDoesNotRequireConsumption() {
+        WhileStmt loop = onlyWhile("""
+                class Solution {
+                  public int solve(int n, boolean flag) {
+                    java.util.ArrayDeque<Integer> q = new java.util.ArrayDeque<>();
+                    q.offer(0);
+                    while (!q.isEmpty()) {
+                      if (flag) {
+                        break;
+                      }
+                      int x = q.poll();
+                    }
+                    return 0;
+                  }
+                }
+                """);
+        WorklistStructuralProof.Attempt attempt = WorklistStructuralProof.attempt(loop, lookup());
+        assertEquals(StaticAnalysisReasonCode.WORKLIST_ADMISSION_NOT_BOUNDED, attempt.failure());
+    }
+
+    @Test
+    void returnAndThrowAreTerminalPaths() {
+        WhileStmt returned = onlyWhile("""
+                class Solution {
+                  public int solve(int n, boolean flag) {
+                    java.util.ArrayDeque<Integer> q = new java.util.ArrayDeque<>();
+                    q.offer(0);
+                    while (!q.isEmpty()) {
+                      if (flag) {
+                        return 0;
+                      }
+                      int x = q.poll();
+                    }
+                    return 0;
+                  }
+                }
+                """);
+        assertEquals(StaticAnalysisReasonCode.WORKLIST_ADMISSION_NOT_BOUNDED,
+                WorklistStructuralProof.attempt(returned, lookup()).failure());
+        WhileStmt thrown = onlyWhile("""
+                class Solution {
+                  public int solve(int n, boolean flag) {
+                    java.util.ArrayDeque<Integer> q = new java.util.ArrayDeque<>();
+                    q.offer(0);
+                    while (!q.isEmpty()) {
+                      if (flag) {
+                        throw new IllegalStateException();
+                      }
+                      int x = q.poll();
+                    }
+                    return 0;
+                  }
+                }
+                """);
+        assertEquals(StaticAnalysisReasonCode.WORKLIST_ADMISSION_NOT_BOUNDED,
+                WorklistStructuralProof.attempt(thrown, lookup()).failure());
+    }
+
+    @Test
     void rejectsMarkerReset() {
         WhileStmt loop = onlyWhile("""
                 class Solution {
