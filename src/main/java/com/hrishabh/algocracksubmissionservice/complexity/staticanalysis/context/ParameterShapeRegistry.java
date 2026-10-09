@@ -22,7 +22,7 @@ public final class ParameterShapeRegistry {
             Optional<String> rowSymbol,
             Optional<String> colSymbol) {
 
-        enum Kind {
+        public enum Kind {
             SCALAR,
             ONE_DIMENSIONAL,
             TWO_DIMENSIONAL,
