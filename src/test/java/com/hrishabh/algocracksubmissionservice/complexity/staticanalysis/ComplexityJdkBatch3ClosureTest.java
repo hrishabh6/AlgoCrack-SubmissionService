@@ -27,7 +27,7 @@ class ComplexityJdkBatch3ClosureTest {
     }
 
     @Test
-    void arraysCopyOfMarksSpaceIncompleteWithoutFalseO1HighSpace() {
+    void arraysCopyOfComposesLocalAuxiliarySpaceAfterBatch4() {
         StaticAnalysisResult result = analyze("""
                 class Solution { public int solve(int[] a) {
                   int[] b = java.util.Arrays.copyOf(a, a.length);
@@ -36,14 +36,14 @@ class ComplexityJdkBatch3ClosureTest {
                 """, meta("a", "int[]"));
         assertEquals("O(n)", ComplexityExprSimplifier.toBigOString(result.timeExpression()));
         assertEquals(ComplexityConfidence.HIGH, result.timeConfidence());
-        assertEquals("UNKNOWN", ComplexityExprSimplifier.toBigOString(result.spaceExpression()));
-        assertEquals(AnalysisDimensionCompleteness.INCOMPLETE, result.spaceCompleteness());
-        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.JDK_ALLOCATION_NOT_COMPOSED));
-        assertNotEquals(ComplexityConfidence.HIGH, result.spaceConfidence());
+        assertEquals("O(n)", ComplexityExprSimplifier.toBigOString(result.spaceExpression()));
+        assertEquals(AnalysisDimensionCompleteness.COMPLETE, result.spaceCompleteness());
+        assertFalse(result.reasonCodes().contains(StaticAnalysisReasonCode.JDK_ALLOCATION_NOT_COMPOSED));
+        assertEquals(ComplexityConfidence.HIGH, result.spaceConfidence());
     }
 
     @Test
-    void stringToCharArrayMarksSpaceIncompleteWithoutFalseO1HighSpace() {
+    void stringToCharArrayComposesLocalAuxiliarySpaceAfterBatch4() {
         StaticAnalysisResult result = analyze("""
                 class Solution { public int solve(String n) {
                   char[] chars = n.toCharArray();
@@ -51,8 +51,8 @@ class ComplexityJdkBatch3ClosureTest {
                 } }
                 """, meta("n", "String"));
         assertEquals("O(n)", ComplexityExprSimplifier.toBigOString(result.timeExpression()));
-        assertEquals("UNKNOWN", ComplexityExprSimplifier.toBigOString(result.spaceExpression()));
-        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.JDK_ALLOCATION_NOT_COMPOSED));
+        assertEquals("O(n)", ComplexityExprSimplifier.toBigOString(result.spaceExpression()));
+        assertFalse(result.reasonCodes().contains(StaticAnalysisReasonCode.JDK_ALLOCATION_NOT_COMPOSED));
     }
 
     @Test
