@@ -42,6 +42,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.S
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.CollectionGrowthSpaceSupport;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.MethodSpaceSummary;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.ReturnAllocationSupport;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.worklist.WorklistStructuralProof;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -52,8 +53,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JavaStaticAnalyzer {
 
-    public static final String ANALYZER_VERSION = "static-v2.4-batch4-space";
-    public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.2-batch4-space";
+    public static final String ANALYZER_VERSION = "static-v2.5-batch5-worklist";
+    public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.3-batch5-worklist";
 
     private static final int MAX_HELPER_ANALYSIS_DEPTH = 128;
 
@@ -468,17 +469,95 @@ public class JavaStaticAnalyzer {
             AnalysisState state,
             InterproceduralContext ipc, MethodIdentity currentMethod,
             int depth) {
+        WorklistStructuralProof.Attempt structural = WorklistStructuralProof.attempt(whileStmt, worklistLookup(state));
+        if (structural.recognized()) {
+            return analyzeProvenOrRejectedWorklist(whileStmt, structural, state, ipc, currentMethod, depth);
+        }
         ConservativeLoopBoundProof.BoundMapper mapper = boundMapper(state);
         ConservativeLoopBoundProof.ProofResult proof = ConservativeLoopBoundProof.proveWhileLoop(whileStmt, mapper);
-        ComplexityExpr body = whileStmt.getBody() instanceof BlockStmt b
-                ? analyzeBlock(b, state, ipc, currentMethod, depth + 1)
-                : analyzeStatement(whileStmt.getBody(), state, ipc, currentMethod, depth + 1);
+        ComplexityExpr body = whileBodyCost(whileStmt, state, ipc, currentMethod, depth);
         if (proof.failure().isPresent()) {
             state.markUnknownLoop(proof.failure().get());
             return new ComplexityExpr.Unknown("loop");
         }
         ComplexityExpr bound = proof.iterationBound().orElseThrow();
         return new ComplexityExpr.Product(List.of(bound, body));
+    }
+
+    private ComplexityExpr analyzeProvenOrRejectedWorklist(
+            WhileStmt whileStmt,
+            WorklistStructuralProof.Attempt structural,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            int depth) {
+        if (structural.proof().isEmpty()) {
+            state.markUnknownLoop(structural.failure());
+            if (unprovenRetainedWorklist(structural.failure())) {
+                state.spaceCompleteness = AnalysisDimensionCompleteness.INCOMPLETE;
+            }
+            whileBodyCost(whileStmt, state, ipc, currentMethod, depth);
+            return new ComplexityExpr.Unknown("worklist");
+        }
+        WorklistStructuralProof.Proof proof = structural.proof().get();
+        state.structuralCardinality.put(proof.containerName(), proof.universe());
+        state.addFinding("WORKLIST", whileStmt.getBegin().map(p -> p.line).orElse(null),
+                whileStmt.getEnd().map(p -> p.line).orElse(null),
+                proof.evidence(), "HIGH", proof.evidence());
+        try {
+            ComplexityExpr body = whileBodyCost(whileStmt, state, ipc, currentMethod, depth);
+            if (body instanceof ComplexityExpr.Unknown) {
+                return body;
+            }
+            return new ComplexityExpr.Product(List.of(proof.universe(), body));
+        } finally {
+            state.structuralCardinality.remove(proof.containerName());
+        }
+    }
+
+    private static boolean unprovenRetainedWorklist(StaticAnalysisReasonCode code) {
+        return switch (code) {
+            case WORKLIST_CONSUMPTION_NOT_PROVEN, WORKLIST_MUTATION_UNRESOLVED, WORKLIST_ADMISSION_NOT_BOUNDED,
+                    WORKLIST_DUPLICATE_ADMISSION_POSSIBLE, ADMISSION_STATE_IDENTITY_UNRESOLVED,
+                    VISITED_MARKER_NOT_MONOTONIC, WORKLIST_STATE_UNIVERSE_UNRESOLVED,
+                    WORKLIST_CARDINALITY_UNRESOLVED, WORKLIST_CONTAINER_UNRESOLVED -> true;
+            default -> false;
+        };
+    }
+
+    private ComplexityExpr whileBodyCost(
+            WhileStmt whileStmt,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            int depth) {
+        return whileStmt.getBody() instanceof BlockStmt block
+                ? analyzeBlock(block, state, ipc, currentMethod, depth + 1)
+                : analyzeStatement(whileStmt.getBody(), state, ipc, currentMethod, depth + 1);
+    }
+
+    private WorklistStructuralProof.Lookup worklistLookup(AnalysisState state) {
+        return new WorklistStructuralProof.Lookup() {
+            @Override
+            public Optional<ComplexityExpr> sizeOf(Expression expression) {
+                return mapSizeExpression(expression, state);
+            }
+
+            @Override
+            public Optional<String> concreteType(String localName) {
+                return Optional.ofNullable(state.localJdkConcreteTypes.get(localName));
+            }
+        };
+    }
+
+    private static void bindCompileTimeTable(String localName, Expression initializer, AnalysisState state) {
+        Expression table = initializer;
+        if (table instanceof ArrayCreationExpr array && array.getInitializer().isPresent()) {
+            table = array.getInitializer().get();
+        }
+        if (table instanceof ArrayInitializerExpr) {
+            state.sizeResolver.bindLocalAlias(localName, ComplexityExpr.one());
+        }
     }
 
     private ConservativeLoopBoundProof.BoundMapper boundMapper(AnalysisState state) {
@@ -597,8 +676,10 @@ public class JavaStaticAnalyzer {
                     Expression init = variable.getInitializer().get();
                     if (init instanceof ObjectCreationExpr creation) {
                         state.registerLocalFromCreation(variable.getNameAsString(), creation);
+                        state.noteProvenPriorityQueueComparator(variable.getNameAsString(), creation);
                     }
                     registerLocalSizeAlias(variable.getNameAsString(), init, state);
+                    bindCompileTimeTable(variable.getNameAsString(), init, state);
                     total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                             total,
                             analyzeExpression(init, state, ipc, currentMethod))));
@@ -630,6 +711,14 @@ public class JavaStaticAnalyzer {
                     "Object allocation " + creation.getType().getNameAsString());
             return size;
         }
+        if (expression instanceof ArrayInitializerExpr initializer) {
+            ComplexityExpr total = ComplexityExpr.one();
+            for (Expression value : initializer.getValues()) {
+                total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
+                        total, analyzeExpression(value, state, ipc, currentMethod))));
+            }
+            return total;
+        }
         if (expression instanceof ArrayCreationExpr arrayCreation && !arrayCreation.getLevels().isEmpty()) {
             ComplexityExpr magnitude = arrayAllocationMagnitude(
                     arrayCreation, state, ipc, currentMethod);
@@ -637,6 +726,12 @@ public class JavaStaticAnalyzer {
                     arrayCreation.getEnd().map(p -> p.line).orElse(null),
                     ComplexityExprSimplifier.toExpressionString(magnitude), "MEDIUM", "Array allocation");
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(magnitude, ComplexityExpr.one())));
+        }
+        if (expression instanceof LambdaExpr lambda) {
+            if (AnalysisState.isShallowComparator(lambda)) {
+                return ComplexityExpr.one();
+            }
+            return unsupportedExpression(expression, state);
         }
         if (expression instanceof CastExpr cast) {
             return analyzeExpression(cast.getExpression(), state, ipc, currentMethod);
@@ -779,13 +874,21 @@ public class JavaStaticAnalyzer {
             return Optional.of(new JdkBoundCall(jdkEntry,
                     new ComplexityExpr.Unknown("jdk comparator cost unresolved"), ComplexityExpr.one()));
         }
-        JdkCallSiteBinder.BindResult bound = JdkCallSiteBinder.bind(
-                jdkEntry,
-                call,
-                resolvedTarget,
-                expr -> mapSizeExpression(expr, state),
-                expr -> state.resolveJdkReceiverCardinality(expr),
-                state.documentedSymbolKeys());
+        JdkCallSiteBinder.BindResult bound = bindJdkCall(jdkEntry, call, resolvedTarget, state);
+        if (!bound.success()
+                && bound.failureKind() == JdkCallSiteBinder.FailureKind.CARDINALITY_UNRESOLVED
+                && call.getScope().isPresent()
+                && call.getScope().get() instanceof NameExpr receiver) {
+            Optional<WorklistStructuralProof.Proof> known = provenWorklistFor(call, receiver.getNameAsString(), state);
+            if (known.isPresent() && !state.structuralCardinality.containsKey(receiver.getNameAsString())) {
+                state.structuralCardinality.put(receiver.getNameAsString(), known.get().universe());
+                try {
+                    bound = bindJdkCall(jdkEntry, call, resolvedTarget, state);
+                } finally {
+                    state.structuralCardinality.remove(receiver.getNameAsString());
+                }
+            }
+        }
         if (!bound.success()) {
             StaticAnalysisReasonCode code = switch (bound.failureKind()) {
                 case CARDINALITY_UNRESOLVED -> StaticAnalysisReasonCode.JDK_CARDINALITY_UNRESOLVED;
@@ -797,6 +900,36 @@ public class JavaStaticAnalyzer {
                     new ComplexityExpr.Unknown("jdk call-site bind failed"), ComplexityExpr.one()));
         }
         return Optional.of(new JdkBoundCall(jdkEntry, bound.time(), bound.allocation()));
+    }
+
+    private JdkCallSiteBinder.BindResult bindJdkCall(
+            JdkKnowledgeEntry jdkEntry,
+            MethodCallExpr call,
+            JdkCallTarget resolvedTarget,
+            AnalysisState state) {
+        return JdkCallSiteBinder.bind(
+                jdkEntry,
+                call,
+                resolvedTarget,
+                expr -> mapSizeExpression(expr, state),
+                expr -> state.resolveJdkReceiverCardinality(expr),
+                state.documentedSymbolKeys());
+    }
+
+    private Optional<WorklistStructuralProof.Proof> provenWorklistFor(
+            MethodCallExpr call, String container, AnalysisState state) {
+        Optional<com.github.javaparser.ast.body.MethodDeclaration> method =
+                call.findAncestor(com.github.javaparser.ast.body.MethodDeclaration.class);
+        if (method.isEmpty()) {
+            return Optional.empty();
+        }
+        for (WhileStmt loop : method.get().findAll(WhileStmt.class)) {
+            WorklistStructuralProof.Attempt attempt = WorklistStructuralProof.attempt(loop, worklistLookup(state));
+            if (attempt.proof().isPresent() && container.equals(attempt.proof().get().containerName())) {
+                return attempt.proof();
+            }
+        }
+        return Optional.empty();
     }
 
     private static boolean isNonTrivialJdkAllocation(ComplexityExpr allocation) {
@@ -1069,7 +1202,7 @@ public class JavaStaticAnalyzer {
             return arrayAllocationMagnitude(array, state, ipc, currentMethod);
         }
         if (expression instanceof ObjectCreationExpr creation) {
-            if (creation.getArguments().isEmpty()) {
+            if (creation.getArguments().isEmpty() || creation.getArgument(0) instanceof LambdaExpr) {
                 return ComplexityExpr.one();
             }
             return sizeOrEvaluationCost(
@@ -1299,6 +1432,8 @@ public class JavaStaticAnalyzer {
         final Map<String, String> localNameToType = new HashMap<>();
         final Map<String, String> localNameToRawType = new HashMap<>();
         final Map<String, String> localJdkConcreteTypes = new HashMap<>();
+        final Map<String, ComplexityExpr> structuralCardinality = new HashMap<>();
+        final Set<String> provenComparatorLocals = new HashSet<>();
         String declaringTypeName = "Solution";
         AnalysisDimensionCompleteness timeCompleteness = AnalysisDimensionCompleteness.COMPLETE;
         AnalysisDimensionCompleteness spaceCompleteness = AnalysisDimensionCompleteness.COMPLETE;
@@ -1395,9 +1530,109 @@ public class JavaStaticAnalyzer {
             };
         }
 
+        void noteProvenPriorityQueueComparator(String localName, ObjectCreationExpr creation) {
+            if (!creation.getType().getNameAsString().endsWith("PriorityQueue")) {
+                return;
+            }
+            for (Expression argument : creation.getArguments()) {
+                if (argument instanceof LambdaExpr lambda && isShallowComparator(lambda)) {
+                    provenComparatorLocals.add(localName);
+                }
+            }
+        }
+
+        private static boolean isShallowComparator(LambdaExpr lambda) {
+            Optional<Expression> body = lambda.getExpressionBody();
+            if (body.isEmpty() && lambda.getBody() instanceof BlockStmt block
+                    && block.getStatements().size() == 1
+                    && block.getStatement(0) instanceof ReturnStmt ret) {
+                body = ret.getExpression();
+            }
+            if (body.isEmpty()) {
+                return false;
+            }
+            return isConstantTimeComparison(body.get(), lambda);
+        }
+
+        private static boolean isConstantTimeComparison(Expression expression, LambdaExpr lambda) {
+            if (expression instanceof EnclosedExpr enclosed) {
+                return isConstantTimeComparison(enclosed.getInner(), lambda);
+            }
+            if (expression instanceof MethodCallExpr call) {
+                if (!call.getArguments().stream().allMatch(JavaStaticAnalyzer.AnalysisState::isShallowValue)) {
+                    return false;
+                }
+                if ("compare".equals(call.getNameAsString()) && call.getScope().isPresent()
+                        && isFixedWidthCompareOwner(call.getScope().get())) {
+                    return true;
+                }
+                if ("compareTo".equals(call.getNameAsString()) && call.getScope().isPresent()) {
+                    return fixedWidthType(call.getScope().get(), lambda);
+                }
+                return false;
+            }
+            if (expression instanceof BinaryExpr binary && binary.getOperator() == BinaryExpr.Operator.MINUS) {
+                return fixedWidthType(binary.getLeft(), lambda) && fixedWidthType(binary.getRight(), lambda);
+            }
+            return false;
+        }
+
+        private static boolean isShallowValue(Expression expression) {
+            if (expression instanceof EnclosedExpr enclosed) {
+                return isShallowValue(enclosed.getInner());
+            }
+            if (expression instanceof FieldAccessExpr access) {
+                return isShallowValue(access.getScope());
+            }
+            return expression instanceof NameExpr || expression instanceof LiteralExpr;
+        }
+
+        private static boolean isFixedWidthCompareOwner(Expression scope) {
+            if (!(scope instanceof NameExpr name)) {
+                return false;
+            }
+            String simple = name.getNameAsString();
+            int dot = simple.lastIndexOf('.');
+            if (dot >= 0) {
+                simple = simple.substring(dot + 1);
+            }
+            return switch (simple) {
+                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "Boolean" -> true;
+                default -> false;
+            };
+        }
+
+        private static boolean fixedWidthType(Expression expression, LambdaExpr lambda) {
+            if (expression instanceof EnclosedExpr enclosed) {
+                return fixedWidthType(enclosed.getInner(), lambda);
+            }
+            if (expression instanceof LiteralExpr) {
+                return expression instanceof IntegerLiteralExpr || expression instanceof LongLiteralExpr
+                        || expression instanceof DoubleLiteralExpr || expression instanceof CharLiteralExpr;
+            }
+            if (!(expression instanceof NameExpr name)) {
+                return false;
+            }
+            for (Parameter parameter : lambda.getParameters()) {
+                if (!parameter.getNameAsString().equals(name.getNameAsString()) || parameter.getType().isUnknownType()) {
+                    continue;
+                }
+                String erased = MethodIdentity.eraseType(parameter.getType().asString());
+                return switch (erased) {
+                    case "int", "Integer", "long", "Long", "short", "Short", "byte", "Byte", "char", "Character",
+                            "double", "Double", "float", "Float", "boolean", "Boolean" -> true;
+                    default -> false;
+                };
+            }
+            return false;
+        }
+
         boolean comparatorCostProvenForCall(MethodCallExpr call) {
             if (call.getScope().isEmpty() || !(call.getScope().get() instanceof NameExpr name)) {
                 return false;
+            }
+            if (provenComparatorLocals.contains(name.getNameAsString())) {
+                return true;
             }
             String raw = localNameToRawType.getOrDefault(name.getNameAsString(),
                     paramTypes.get(name.getNameAsString()));
@@ -1421,7 +1656,7 @@ public class JavaStaticAnalyzer {
                 return false;
             }
             return switch (typeArg) {
-                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "String", "int", "long",
+                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "int", "long",
                         "double", "float", "short", "byte", "char" -> true;
                 default -> false;
             };
@@ -1429,6 +1664,10 @@ public class JavaStaticAnalyzer {
 
         Optional<ComplexityExpr> resolveJdkReceiverCardinality(Expression expression) {
             if (expression instanceof NameExpr name) {
+                ComplexityExpr structural = structuralCardinality.get(name.getNameAsString());
+                if (structural != null) {
+                    return Optional.of(structural);
+                }
                 String param = name.getNameAsString();
                 for (ParameterShapeRegistry.ParameterShape shape : parameterShapes) {
                     if (shape.paramName().equals(param)

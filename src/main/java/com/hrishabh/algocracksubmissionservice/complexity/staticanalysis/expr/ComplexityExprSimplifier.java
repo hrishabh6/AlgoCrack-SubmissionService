@@ -182,6 +182,12 @@ public final class ComplexityExprSimplifier {
         if (dominant instanceof ComplexityExpr.Constant) {
             return false;
         }
+        if (subordinate instanceof ComplexityExpr.Log logSub && !(dominant instanceof ComplexityExpr.Log)) {
+            java.util.Set<String> needed = variableNames(logSub.argument());
+            if (!needed.isEmpty() && variableNames(dominant).containsAll(needed)) {
+                return true;
+            }
+        }
         if (subordinate instanceof ComplexityExpr.Log logSub
                 && logSub.argument() instanceof ComplexityExpr.Variable vSub) {
             if (dominant instanceof ComplexityExpr.Variable vDom && vDom.name().equals(vSub.name())) {
@@ -219,7 +225,10 @@ public final class ComplexityExprSimplifier {
         }
         if (dom.kind == TermKind.PRODUCT && sub.kind == TermKind.PRODUCT
                 && sameVariableMultiset(dom.productVars, sub.productVars)) {
-            return coefficient(dom) > coefficient(sub);
+            if (coefficient(dom) != coefficient(sub)) {
+                return coefficient(dom) > coefficient(sub);
+            }
+            return containsLogFactor(dominant) && !containsLogFactor(subordinate);
         }
         if (dom.kind == TermKind.PRODUCT && sub.kind == TermKind.VARIABLE
                 && dom.productVars.containsKey(sub.variable) && dom.productVars.size() > 1) {
@@ -229,6 +238,16 @@ public final class ComplexityExprSimplifier {
                 && dom.productVars.containsKey(sub.variable)
                 && totalDegree(dom.productVars) > sub.exponent) {
             return true;
+        }
+        return false;
+    }
+
+    private static boolean containsLogFactor(ComplexityExpr expr) {
+        if (expr instanceof ComplexityExpr.Log) {
+            return true;
+        }
+        if (expr instanceof ComplexityExpr.Product product) {
+            return product.factors().stream().anyMatch(ComplexityExprSimplifier::containsLogFactor);
         }
         return false;
     }

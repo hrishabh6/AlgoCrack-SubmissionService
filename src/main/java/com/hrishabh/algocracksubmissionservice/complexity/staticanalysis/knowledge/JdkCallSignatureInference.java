@@ -70,6 +70,9 @@ public final class JdkCallSignatureInference {
         if (expression instanceof com.github.javaparser.ast.expr.ArrayCreationExpr array) {
             return Optional.of(JdkOperationIdentity.eraseType(array.getElementType().asString()) + "[]");
         }
+        if (expression instanceof com.github.javaparser.ast.expr.ObjectCreationExpr creation) {
+            return Optional.of(JdkOperationIdentity.eraseType(creation.getType().asString()));
+        }
         return Optional.empty();
     }
 }
