@@ -8,6 +8,7 @@ import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExprSimplifier;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.MethodIdentity;
 
 import java.util.HashSet;
 import java.util.List;
@@ -70,6 +71,22 @@ public final class RecurrenceSupport {
         return totalTime(pattern, sibling, sizeVar);
     }
 
+    public static ArgumentPattern unifiedStackPatternFromIdentity(MethodDeclaration method, MethodIdentity identity) {
+        List<MethodCallExpr> selfCalls = DirectRecurrenceAnalyzer.directSelfCalls(method, identity);
+        if (selfCalls.isEmpty()) {
+            return ArgumentPattern.UNSUPPORTED;
+        }
+        if (selfCalls.size() != 1) {
+            return ArgumentPattern.UNSUPPORTED;
+        }
+        MethodCallExpr call = selfCalls.getFirst();
+        if (call.getArguments().isEmpty()) {
+            return ArgumentPattern.UNSUPPORTED;
+        }
+        ArgumentPattern pattern = classifyArgument(call.getArgument(0));
+        return pattern == ArgumentPattern.UNSUPPORTED ? ArgumentPattern.UNSUPPORTED : pattern;
+    }
+
     public static ArgumentPattern unifiedStackPattern(MethodDeclaration method, String methodName) {
         List<MethodCallExpr> selfCalls = directSelfCalls(method, methodName);
         if (selfCalls.isEmpty()) {
@@ -98,6 +115,11 @@ public final class RecurrenceSupport {
         ComplexityExpr simplified = ComplexityExprSimplifier.simplify(siblingWorkPerLevel);
         if (simplified instanceof ComplexityExpr.Constant c && c.value() <= 1) {
             return ComplexityExpr.var(sizeVar);
+        }
+        if (isLinearInVariable(simplified, sizeVar)) {
+            return new ComplexityExpr.Product(List.of(
+                    ComplexityExpr.var(sizeVar),
+                    ComplexityExpr.var(sizeVar)));
         }
         return new ComplexityExpr.Unknown("linear-decrement recurrence with unproven sibling work");
     }

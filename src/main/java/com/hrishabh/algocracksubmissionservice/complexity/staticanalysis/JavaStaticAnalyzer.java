@@ -24,6 +24,13 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowled
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.loop.ConservativeLoopBoundProof;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.AnalysisDimensionCompleteness;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisReasonCode;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.HelperCallSiteSupport;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.InterproceduralContext;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.MethodCallGraph;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.MethodIdentity;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.UserMethodIndex;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.interprocedural.UserMethodOverloadResolver;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.DirectRecurrenceAnalyzer;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.RecurrenceSupport;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.RecurrenceSupport.ArgumentPattern;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
@@ -39,7 +46,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JavaStaticAnalyzer {
 
-    public static final String ANALYZER_VERSION = "static-v2.1-dev";
+    public static final String ANALYZER_VERSION = "static-v2.2-dev";
     public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.1-dev";
 
     private static final int MAX_HELPER_ANALYSIS_DEPTH = 128;
@@ -73,11 +80,15 @@ public class JavaStaticAnalyzer {
 
             detectMutableStatic(unit, state);
 
-            Map<String, MethodDeclaration> methodIndex = indexMethods(unit);
-            Map<String, ComplexityExpr> memo = new HashMap<>();
-            Map<String, MethodVisitState> visitStates = new HashMap<>();
-            ComplexityExpr time = analyzeBlock(entryMethod.getBody().orElse(new BlockStmt()), state, methodIndex, memo, visitStates, entryMethod.getNameAsString(), 0);
-            ComplexityExpr space = analyzeAuxiliarySpacePeak(entryMethod, state, methodIndex, memo, visitStates);
+            UserMethodIndex userMethods = UserMethodIndex.build(unit);
+            InterproceduralContext ipc = new InterproceduralContext(userMethods);
+            String declaringTypeName = entryMethod.findAncestor(ClassOrInterfaceDeclaration.class)
+                    .map(ClassOrInterfaceDeclaration::getNameAsString)
+                    .orElse("Solution");
+            MethodIdentity entryIdentity = MethodIdentity.of(entryMethod, declaringTypeName);
+            state.setAnalysisContext(declaringTypeName, entryIdentity);
+            ComplexityExpr time = analyzeBlock(entryMethod.getBody().orElse(new BlockStmt()), state, ipc, entryIdentity, 0);
+            ComplexityExpr space = analyzeAuxiliarySpacePeak(entryMethod, state, ipc, entryIdentity);
 
             return buildFinalResult(state, variables, findings, limitations, time, space);
         } catch (Exception ex) {
@@ -294,27 +305,15 @@ public class JavaStaticAnalyzer {
         }
     }
 
-    private static Map<String, MethodDeclaration> indexMethods(CompilationUnit unit) {
-        Map<String, MethodDeclaration> methods = new HashMap<>();
-        for (MethodDeclaration method : unit.findAll(MethodDeclaration.class)) {
-            if (!method.isAbstract()) {
-                methods.putIfAbsent(method.getNameAsString(), method);
-            }
-        }
-        return methods;
-    }
 
     private ComplexityExpr analyzeBlock(
             BlockStmt block,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             int depth) {
         List<ComplexityExpr> sequential = new ArrayList<>();
         for (Statement statement : block.getStatements()) {
-            sequential.add(analyzeStatement(statement, state, methodIndex, memo, visitStates, currentMethod, depth));
+            sequential.add(analyzeStatement(statement, state, ipc, currentMethod, depth));
         }
         if (sequential.isEmpty()) {
             return ComplexityExpr.one();
@@ -328,47 +327,44 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeStatement(
             Statement statement,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             int depth) {
         return switch (statement) {
-            case BlockStmt block -> analyzeBlock(block, state, methodIndex, memo, visitStates, currentMethod, depth);
+            case BlockStmt block -> analyzeBlock(block, state, ipc, currentMethod, depth);
             case IfStmt ifStmt -> {
                 ComplexityExpr conditionCost = analyzeExpression(
-                        ifStmt.getCondition(), state, methodIndex, memo, visitStates, currentMethod);
+                        ifStmt.getCondition(), state, ipc, currentMethod);
                 ComplexityExpr thenCost = ifStmt.getThenStmt() instanceof BlockStmt b
-                        ? analyzeBlock(b, state, methodIndex, memo, visitStates, currentMethod, depth)
-                        : analyzeStatement(ifStmt.getThenStmt(), state, methodIndex, memo, visitStates, currentMethod, depth);
+                        ? analyzeBlock(b, state, ipc, currentMethod, depth)
+                        : analyzeStatement(ifStmt.getThenStmt(), state, ipc, currentMethod, depth);
                 ComplexityExpr elseCost = ifStmt.getElseStmt()
                         .map(s -> s instanceof BlockStmt b
-                                ? analyzeBlock(b, state, methodIndex, memo, visitStates, currentMethod, depth)
-                                : analyzeStatement(s, state, methodIndex, memo, visitStates, currentMethod, depth))
+                                ? analyzeBlock(b, state, ipc, currentMethod, depth)
+                                : analyzeStatement(s, state, ipc, currentMethod, depth))
                         .orElse(ComplexityExpr.one());
                 ComplexityExpr branch = ComplexityExprSimplifier.branchWorstCase(thenCost, elseCost);
                 yield ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(conditionCost, branch)));
             }
-            case ForStmt forStmt -> analyzeForLoop(forStmt, state, methodIndex, memo, visitStates, currentMethod, depth);
-            case ForEachStmt forEach -> analyzeForEach(forEach, state, methodIndex, memo, visitStates, currentMethod, depth);
-            case WhileStmt whileStmt -> analyzeWhile(whileStmt, state, methodIndex, memo, visitStates, currentMethod, depth);
+            case ForStmt forStmt -> analyzeForLoop(forStmt, state, ipc, currentMethod, depth);
+            case ForEachStmt forEach -> analyzeForEach(forEach, state, ipc, currentMethod, depth);
+            case WhileStmt whileStmt -> analyzeWhile(whileStmt, state, ipc, currentMethod, depth);
             case DoStmt doStmt -> {
                 state.markUnknownLoop(StaticAnalysisReasonCode.LOOP_PROGRESS_NOT_PROVEN);
                 ComplexityExpr body = doStmt.getBody() instanceof BlockStmt b
-                        ? analyzeBlock(b, state, methodIndex, memo, visitStates, currentMethod, depth + 1)
-                        : analyzeStatement(doStmt.getBody(), state, methodIndex, memo, visitStates, currentMethod, depth + 1);
+                        ? analyzeBlock(b, state, ipc, currentMethod, depth + 1)
+                        : analyzeStatement(doStmt.getBody(), state, ipc, currentMethod, depth + 1);
                 yield new ComplexityExpr.Unknown("do-while");
             }
             case SwitchStmt switchStmt -> {
                 ComplexityExpr selector = analyzeExpression(
-                        switchStmt.getSelector(), state, methodIndex, memo, visitStates, currentMethod);
+                        switchStmt.getSelector(), state, ipc, currentMethod);
                 ComplexityExpr armWorst = ComplexityExpr.one();
                 for (SwitchEntry entry : switchStmt.getEntries()) {
                     ComplexityExpr entryCost = ComplexityExpr.one();
                     for (Statement inner : entry.getStatements()) {
                         entryCost = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                                 entryCost,
-                                analyzeStatement(inner, state, methodIndex, memo, visitStates, currentMethod, depth))));
+                                analyzeStatement(inner, state, ipc, currentMethod, depth))));
                     }
                     armWorst = ComplexityExprSimplifier.branchWorstCase(armWorst, entryCost);
                 }
@@ -376,12 +372,12 @@ public class JavaStaticAnalyzer {
             }
             case TryStmt tryStmt -> {
                 List<ComplexityExpr> parts = new ArrayList<>();
-                parts.add(analyzeBlock(tryStmt.getTryBlock(), state, methodIndex, memo, visitStates, currentMethod, depth));
+                parts.add(analyzeBlock(tryStmt.getTryBlock(), state, ipc, currentMethod, depth));
                 for (CatchClause catchClause : tryStmt.getCatchClauses()) {
-                    parts.add(analyzeBlock(catchClause.getBody(), state, methodIndex, memo, visitStates, currentMethod, depth));
+                    parts.add(analyzeBlock(catchClause.getBody(), state, ipc, currentMethod, depth));
                 }
                 tryStmt.getFinallyBlock().ifPresent(finallyBlock ->
-                        parts.add(analyzeBlock(finallyBlock, state, methodIndex, memo, visitStates, currentMethod, depth)));
+                        parts.add(analyzeBlock(finallyBlock, state, ipc, currentMethod, depth)));
                 ComplexityExpr tryWorst = ComplexityExpr.one();
                 for (ComplexityExpr part : parts) {
                     tryWorst = ComplexityExprSimplifier.branchWorstCase(tryWorst, part);
@@ -389,13 +385,13 @@ public class JavaStaticAnalyzer {
                 yield ComplexityExprSimplifier.simplify(tryWorst);
             }
             case ReturnStmt returnStmt -> returnStmt.getExpression()
-                    .map(expr -> analyzeExpression(expr, state, methodIndex, memo, visitStates, currentMethod))
+                    .map(expr -> analyzeExpression(expr, state, ipc, currentMethod))
                     .orElse(ComplexityExpr.one());
             case ExpressionStmt expressionStmt -> {
                 if (expressionStmt.getExpression() == null) {
                     yield ComplexityExpr.one();
                 }
-                yield analyzeExpression(expressionStmt.getExpression(), state, methodIndex, memo, visitStates, currentMethod);
+                yield analyzeExpression(expressionStmt.getExpression(), state, ipc, currentMethod);
             }
             default -> unsupportedStatement(statement, state);
         };
@@ -409,16 +405,13 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeForLoop(
             ForStmt forStmt,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             int depth) {
         ConservativeLoopBoundProof.BoundMapper mapper = boundMapper(state);
         ConservativeLoopBoundProof.ProofResult proof = ConservativeLoopBoundProof.proveForLoop(forStmt, mapper);
         ComplexityExpr body = forStmt.getBody() instanceof BlockStmt b
-                ? analyzeBlock(b, state, methodIndex, memo, visitStates, currentMethod, depth + 1)
-                : analyzeStatement(forStmt.getBody(), state, methodIndex, memo, visitStates, currentMethod, depth + 1);
+                ? analyzeBlock(b, state, ipc, currentMethod, depth + 1)
+                : analyzeStatement(forStmt.getBody(), state, ipc, currentMethod, depth + 1);
         if (proof.failure().isPresent()) {
             state.markUnknownLoop(proof.failure().get());
             return new ComplexityExpr.Unknown("loop");
@@ -434,15 +427,12 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeForEach(
             ForEachStmt forEach,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             int depth) {
         ComplexityExpr iterableSize = resolveIterableSize(forEach.getIterable(), state);
         ComplexityExpr body = forEach.getBody() instanceof BlockStmt b
-                ? analyzeBlock(b, state, methodIndex, memo, visitStates, currentMethod, depth + 1)
-                : analyzeStatement(forEach.getBody(), state, methodIndex, memo, visitStates, currentMethod, depth + 1);
+                ? analyzeBlock(b, state, ipc, currentMethod, depth + 1)
+                : analyzeStatement(forEach.getBody(), state, ipc, currentMethod, depth + 1);
         if (iterableSize instanceof ComplexityExpr.Unknown) {
             state.markUnknownLoop(StaticAnalysisReasonCode.UNKNOWN_LOOP_BOUND);
         }
@@ -452,16 +442,13 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeWhile(
             WhileStmt whileStmt,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             int depth) {
         ConservativeLoopBoundProof.BoundMapper mapper = boundMapper(state);
         ConservativeLoopBoundProof.ProofResult proof = ConservativeLoopBoundProof.proveWhileLoop(whileStmt, mapper);
         ComplexityExpr body = whileStmt.getBody() instanceof BlockStmt b
-                ? analyzeBlock(b, state, methodIndex, memo, visitStates, currentMethod, depth + 1)
-                : analyzeStatement(whileStmt.getBody(), state, methodIndex, memo, visitStates, currentMethod, depth + 1);
+                ? analyzeBlock(b, state, ipc, currentMethod, depth + 1)
+                : analyzeStatement(whileStmt.getBody(), state, ipc, currentMethod, depth + 1);
         if (proof.failure().isPresent()) {
             state.markUnknownLoop(proof.failure().get());
             return new ComplexityExpr.Unknown("loop");
@@ -499,17 +486,14 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr sizeOrEvaluationCost(
             Expression expression,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod) {
+            InterproceduralContext ipc, MethodIdentity currentMethod) {
         if (expression != null) {
             Optional<ComplexityExpr> sized = mapSizeExpression(expression, state);
             if (sized.isPresent()) {
                 return sized.get();
             }
         }
-        return analyzeExpression(expression, state, methodIndex, memo, visitStates, currentMethod);
+        return analyzeExpression(expression, state, ipc, currentMethod);
     }
 
     private ComplexityExpr resolveIterableSize(Expression iterable, AnalysisState state) {
@@ -536,10 +520,7 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeExpression(
             Expression expression,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod) {
+            InterproceduralContext ipc, MethodIdentity currentMethod) {
         if (expression == null) {
             return ComplexityExpr.one();
         }
@@ -550,49 +531,50 @@ public class JavaStaticAnalyzer {
             return evaluationCostOfName(name.getNameAsString(), state);
         }
         if (expression instanceof EnclosedExpr enclosed) {
-            return analyzeExpression(enclosed.getInner(), state, methodIndex, memo, visitStates, currentMethod);
+            return analyzeExpression(enclosed.getInner(), state, ipc, currentMethod);
         }
         if (expression instanceof UnaryExpr unary) {
-            return analyzeExpression(unary.getExpression(), state, methodIndex, memo, visitStates, currentMethod);
+            return analyzeExpression(unary.getExpression(), state, ipc, currentMethod);
         }
         if (expression instanceof BinaryExpr binary) {
             if (binary.getOperator() == BinaryExpr.Operator.PLUS) {
                 return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
-                        analyzeExpression(binary.getLeft(), state, methodIndex, memo, visitStates, currentMethod),
-                        analyzeExpression(binary.getRight(), state, methodIndex, memo, visitStates, currentMethod))));
+                        analyzeExpression(binary.getLeft(), state, ipc, currentMethod),
+                        analyzeExpression(binary.getRight(), state, ipc, currentMethod))));
             }
             if (binary.getOperator() == BinaryExpr.Operator.MULTIPLY) {
                 return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
-                        analyzeExpression(binary.getLeft(), state, methodIndex, memo, visitStates, currentMethod),
-                        analyzeExpression(binary.getRight(), state, methodIndex, memo, visitStates, currentMethod),
+                        analyzeExpression(binary.getLeft(), state, ipc, currentMethod),
+                        analyzeExpression(binary.getRight(), state, ipc, currentMethod),
                         ComplexityExpr.one())));
             }
             if (isPureEvaluationBinary(binary.getOperator())) {
                 return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
-                        analyzeExpression(binary.getLeft(), state, methodIndex, memo, visitStates, currentMethod),
-                        analyzeExpression(binary.getRight(), state, methodIndex, memo, visitStates, currentMethod))));
+                        analyzeExpression(binary.getLeft(), state, ipc, currentMethod),
+                        analyzeExpression(binary.getRight(), state, ipc, currentMethod))));
             }
             return unsupportedExpression(expression, state);
         }
         if (expression instanceof ConditionalExpr conditional) {
             ComplexityExpr condition = analyzeExpression(
-                    conditional.getCondition(), state, methodIndex, memo, visitStates, currentMethod);
+                    conditional.getCondition(), state, ipc, currentMethod);
             ComplexityExpr thenExpr = analyzeExpression(
-                    conditional.getThenExpr(), state, methodIndex, memo, visitStates, currentMethod);
+                    conditional.getThenExpr(), state, ipc, currentMethod);
             ComplexityExpr elseExpr = analyzeExpression(
-                    conditional.getElseExpr(), state, methodIndex, memo, visitStates, currentMethod);
+                    conditional.getElseExpr(), state, ipc, currentMethod);
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                     condition, ComplexityExprSimplifier.branchWorstCase(thenExpr, elseExpr))));
         }
         if (expression instanceof VariableDeclarationExpr varDecl) {
             ComplexityExpr total = ComplexityExpr.one();
             for (VariableDeclarator variable : varDecl.getVariables()) {
+                state.registerLocalType(variable.getNameAsString(), varDecl.getElementType().asString());
                 if (variable.getInitializer().isPresent()) {
                     Expression init = variable.getInitializer().get();
                     registerLocalSizeAlias(variable.getNameAsString(), init, state);
                     total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                             total,
-                            analyzeExpression(init, state, methodIndex, memo, visitStates, currentMethod))));
+                            analyzeExpression(init, state, ipc, currentMethod))));
                 }
             }
             return total;
@@ -602,19 +584,19 @@ public class JavaStaticAnalyzer {
                 registerLocalSizeAlias(name.getNameAsString(), assign.getValue(), state);
             }
             ComplexityExpr target = assign.getTarget() instanceof Expression targetExpr
-                    ? analyzeExpression(targetExpr, state, methodIndex, memo, visitStates, currentMethod)
+                    ? analyzeExpression(targetExpr, state, ipc, currentMethod)
                     : ComplexityExpr.one();
             ComplexityExpr value = analyzeExpression(
-                    assign.getValue(), state, methodIndex, memo, visitStates, currentMethod);
+                    assign.getValue(), state, ipc, currentMethod);
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(target, value)));
         }
         if (expression instanceof MethodCallExpr call) {
-            return analyzeMethodCall(call, state, methodIndex, memo, visitStates, currentMethod);
+            return analyzeMethodCall(call, state, ipc, currentMethod);
         }
         if (expression instanceof ObjectCreationExpr creation) {
             ComplexityExpr size = creation.getArguments().isEmpty()
                     ? ComplexityExpr.one()
-                    : analyzeExpression(creation.getArguments().get(0), state, methodIndex, memo, visitStates, currentMethod);
+                    : analyzeExpression(creation.getArguments().get(0), state, ipc, currentMethod);
             state.addFinding("ALLOCATION", creation.getBegin().map(p -> p.line).orElse(null),
                     creation.getEnd().map(p -> p.line).orElse(null),
                     ComplexityExprSimplifier.toExpressionString(size), "MEDIUM",
@@ -623,23 +605,23 @@ public class JavaStaticAnalyzer {
         }
         if (expression instanceof ArrayCreationExpr arrayCreation && !arrayCreation.getLevels().isEmpty()) {
             ComplexityExpr magnitude = arrayAllocationMagnitude(
-                    arrayCreation, state, methodIndex, memo, visitStates, currentMethod);
+                    arrayCreation, state, ipc, currentMethod);
             state.addFinding("ALLOCATION", arrayCreation.getBegin().map(p -> p.line).orElse(null),
                     arrayCreation.getEnd().map(p -> p.line).orElse(null),
                     ComplexityExprSimplifier.toExpressionString(magnitude), "MEDIUM", "Array allocation");
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(magnitude, ComplexityExpr.one())));
         }
         if (expression instanceof CastExpr cast) {
-            return analyzeExpression(cast.getExpression(), state, methodIndex, memo, visitStates, currentMethod);
+            return analyzeExpression(cast.getExpression(), state, ipc, currentMethod);
         }
         if (expression instanceof ArrayAccessExpr access) {
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
-                    analyzeExpression(access.getName(), state, methodIndex, memo, visitStates, currentMethod),
-                    analyzeExpression(access.getIndex(), state, methodIndex, memo, visitStates, currentMethod))));
+                    analyzeExpression(access.getName(), state, ipc, currentMethod),
+                    analyzeExpression(access.getIndex(), state, ipc, currentMethod))));
         }
         if (expression instanceof FieldAccessExpr access) {
             ComplexityExpr scopeCost = analyzeExpression(
-                    access.getScope(), state, methodIndex, memo, visitStates, currentMethod);
+                    access.getScope(), state, ipc, currentMethod);
             return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeCost, ComplexityExpr.one())));
         }
         return unsupportedExpression(expression, state);
@@ -661,36 +643,35 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeMethodCall(
             MethodCallExpr call,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod) {
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod) {
         String methodName = call.getNameAsString();
-        if (call.getScope().isEmpty() && methodIndex.containsKey(methodName)) {
-            if (methodName.equals(currentMethod)) {
-                String recurrenceKey = currentMethod + "#recurrence";
-                if (!memo.containsKey(recurrenceKey)) {
-                    memo.put(recurrenceKey, new ComplexityExpr.Unknown("recurrence pending"));
-                    MethodDeclaration method = methodIndex.get(currentMethod);
-                    ComplexityExpr resolved = RecurrenceSupport.resolveMethodRecurrence(
-                            method,
-                            currentMethod,
-                            state.primarySizeVariable(),
-                            expr -> sizeOrEvaluationCost(
-                                    expr, state, methodIndex, memo, visitStates, currentMethod));
-                    if (resolved instanceof ComplexityExpr.Unknown) {
-                        state.markOpaque("Recurrence pattern not supported");
-                    }
-                    memo.put(recurrenceKey, resolved);
-                }
-                ComplexityExpr recurrence = memo.get(recurrenceKey);
-                state.addFinding("RECURSION", call.getBegin().map(p -> p.line).orElse(null),
-                        call.getEnd().map(p -> p.line).orElse(null),
-                        ComplexityExprSimplifier.toExpressionString(recurrence), "MEDIUM",
-                        "Direct recursion detected");
-                return recurrence;
+        if (call.getScope().isEmpty() && !ipc.userMethods.candidatesInType(state.declaringTypeName, methodName).isEmpty()) {
+            UserMethodOverloadResolver.Resolution resolution = UserMethodOverloadResolver.resolveUnqualifiedCall(
+                    call,
+                    state.declaringTypeName,
+                    ipc.userMethods,
+                    state.localNameToType,
+                    state.paramTypes);
+            if (resolution.outcome() == UserMethodOverloadResolver.ResolutionOutcome.AMBIGUOUS) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.AMBIGUOUS_METHOD_TARGET);
+                return new ComplexityExpr.Unknown("ambiguous method target");
             }
-            return analyzeHelperMethod(methodName, state, methodIndex, memo, visitStates, 0);
+            if (resolution.outcome() == UserMethodOverloadResolver.ResolutionOutcome.UNRESOLVED) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.UNRESOLVED_HELPER_TARGET);
+                return new ComplexityExpr.Unknown("unresolved helper target");
+            }
+            MethodIdentity target = resolution.identity();
+            ipc.callGraph.addEdge(currentMethod, target);
+            MethodCallGraph.RecursionKind recursionKind = ipc.callGraph.classify(target);
+            if (recursionKind == MethodCallGraph.RecursionKind.RECURSIVE_SCC && !target.equals(currentMethod)) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.UNSUPPORTED_RECURSIVE_SCC);
+                return new ComplexityExpr.Unknown("unsupported recursive scc");
+            }
+            if (target.equals(currentMethod)) {
+                return analyzeDirectSelfRecurrence(call, state, ipc, currentMethod, resolution.declaration());
+            }
+            return analyzeResolvedHelperCall(call, state, ipc, currentMethod, target, resolution.declaration(), 0);
         }
         Optional<JdkCallTarget> staticTarget = JdkCallTargetResolver.resolve(call, state.compilationUnit);
         int argCount = call.getArguments().size();
@@ -724,53 +705,128 @@ public class JavaStaticAnalyzer {
         return new ComplexityExpr.Unknown("opaque call");
     }
 
-    private ComplexityExpr analyzeHelperMethod(
-            String methodName,
+    private ComplexityExpr analyzeDirectSelfRecurrence(
+            MethodCallExpr call,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodDeclaration method) {
+        String recurrenceKey = currentMethod.cacheKey() + "#recurrence";
+        if (ipc.recurrenceMemo.containsKey(recurrenceKey)) {
+            ComplexityExpr cached = ipc.recurrenceMemo.get(recurrenceKey);
+            if (cached instanceof ComplexityExpr.Unknown u && "recurrence pending".equals(u.reason())) {
+                return ComplexityExpr.one();
+            }
+            return cached;
+        }
+        {
+            ipc.recurrenceMemo.put(recurrenceKey, new ComplexityExpr.Unknown("recurrence pending"));
+            String sizeParam = primarySizeParameterName(method).orElse("n");
+            AnalysisState siblingState = state.forkForRecurrenceSiblingPass();
+            Optional<DirectRecurrenceAnalyzer.DirectRecurrenceResult> direct = DirectRecurrenceAnalyzer.analyze(
+                    method,
+                    currentMethod,
+                    sizeParam,
+                    stmt -> analyzeStatement(stmt, siblingState, ipc, currentMethod, 0),
+                    expr -> sizeOrEvaluationCost(expr, siblingState, ipc, currentMethod));
+            ComplexityExpr resolved;
+            if (direct.isEmpty()) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.UNSUPPORTED_RECURRENCE);
+                state.markOpaque("Recurrence pattern not supported");
+                resolved = new ComplexityExpr.Unknown("unsupported recurrence");
+            } else {
+                DirectRecurrenceAnalyzer.DirectRecurrenceResult dr = direct.get();
+                String sizeVar = state.paramNameToSymbol.getOrDefault(sizeParam, state.primarySizeVariable());
+                resolved = RecurrenceSupport.totalTime(dr.pattern(), dr.siblingWorkPerLevel(), sizeVar);
+                if (resolved instanceof ComplexityExpr.Unknown) {
+                    state.markTimeIncomplete(StaticAnalysisReasonCode.UNSUPPORTED_RECURRENCE);
+                    state.markOpaque("Recurrence pattern not supported");
+                }
+            }
+            ipc.recurrenceMemo.put(recurrenceKey, resolved);
+        }
+        ComplexityExpr recurrence = ipc.recurrenceMemo.get(recurrenceKey);
+        state.addFinding("RECURSION", call.getBegin().map(p -> p.line).orElse(null),
+                call.getEnd().map(p -> p.line).orElse(null),
+                ComplexityExprSimplifier.toExpressionString(recurrence), "MEDIUM",
+                "Direct recursion detected");
+        return recurrence;
+    }
+
+    private ComplexityExpr analyzeResolvedHelperCall(
+            MethodCallExpr call,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity caller,
+            MethodIdentity target,
+            MethodDeclaration method,
             int depth) {
         if (depth > MAX_HELPER_ANALYSIS_DEPTH) {
             state.markTimeIncomplete(StaticAnalysisReasonCode.INCOMPLETE_TIME_ANALYSIS);
             return new ComplexityExpr.Unknown("helper depth exceeded");
         }
-        MethodVisitState visitState = visitStates.getOrDefault(methodName, MethodVisitState.UNVISITED);
-        if (visitState == MethodVisitState.VISITING) {
+        InterproceduralContext.MethodVisitState visitState =
+                ipc.visitStates.getOrDefault(target, InterproceduralContext.MethodVisitState.UNVISITED);
+        if (visitState == InterproceduralContext.MethodVisitState.VISITING) {
             state.markTimeIncomplete(StaticAnalysisReasonCode.UNKNOWN_RECURSIVE_CYCLE);
             return new ComplexityExpr.Unknown("recursive cycle");
         }
-        if (memo.containsKey(methodName)) {
-            return memo.get(methodName);
+        String summaryKey = target.cacheKey() + "#summary";
+        ComplexityExpr helperSummary = ipc.helperSummaryMemo.get(summaryKey);
+        if (helperSummary == null) {
+            ipc.visitStates.put(target, InterproceduralContext.MethodVisitState.VISITING);
+            AnalysisState helperState = state.forkForHelper(method);
+            helperSummary = analyzeBlock(
+                    method.getBody().orElse(new BlockStmt()), helperState, ipc, target, depth + 1);
+            ipc.visitStates.put(target, InterproceduralContext.MethodVisitState.COMPLETE);
+            if (helperSummary instanceof ComplexityExpr.Unknown) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.HELPER_SUMMARY_INCOMPLETE);
+            }
+            ipc.helperSummaryMemo.put(summaryKey, helperSummary);
         }
-        MethodDeclaration method = methodIndex.get(methodName);
-        if (method == null) {
-            state.markTimeIncomplete(StaticAnalysisReasonCode.OPAQUE_CALL);
-            return new ComplexityExpr.Unknown("unknown helper");
+        HelperCallSiteSupport.SubstitutionResult substitution = HelperCallSiteSupport.substituteAtCallSite(
+                helperSummary,
+                method,
+                call,
+                arg -> mapSizeExpression(arg, state),
+                state.documentedSymbolKeys());
+        if (!substitution.success()) {
+            state.markTimeIncomplete(StaticAnalysisReasonCode.CALLSITE_SUBSTITUTION_FAILED);
+            return new ComplexityExpr.Unknown("call-site substitution failed");
         }
-        visitStates.put(methodName, MethodVisitState.VISITING);
-        ComplexityExpr result = analyzeBlock(
-                method.getBody().orElse(new BlockStmt()), state, methodIndex, memo, visitStates, methodName, depth + 1);
-        visitStates.put(methodName, MethodVisitState.COMPLETE);
-        memo.put(methodName, result);
-        return result;
+        return substitution.expr();
+    }
+
+    private static Optional<String> primarySizeParameterName(MethodDeclaration method) {
+        for (Parameter parameter : method.getParameters()) {
+            String type = MethodIdentity.eraseType(parameter.getType().asString());
+            if ("int".equals(type) || "long".equals(type)) {
+                return Optional.of(parameter.getNameAsString());
+            }
+        }
+        if (!method.getParameters().isEmpty()) {
+            return Optional.of(method.getParameters().get(0).getNameAsString());
+        }
+        return Optional.empty();
     }
 
     private ComplexityExpr analyzeAuxiliarySpacePeak(
             MethodDeclaration entryMethod,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates) {
+            InterproceduralContext ipc,
+            MethodIdentity entryIdentity) {
         ComplexityExpr allocationPeak = analyzeBlockSpacePeak(
-                entryMethod.getBody().orElse(new BlockStmt()), state, methodIndex, memo, visitStates, entryMethod.getNameAsString(), false);
+                entryMethod.getBody().orElse(new BlockStmt()), state, ipc, entryIdentity, false);
 
-        ArgumentPattern stackPattern = RecurrenceSupport.unifiedStackPattern(
-                entryMethod, entryMethod.getNameAsString());
-
+        MethodCallGraph.RecursionKind kind = ipc.callGraph.classify(entryIdentity);
+        ArgumentPattern stackPattern = ArgumentPattern.UNSUPPORTED;
+        if (kind == MethodCallGraph.RecursionKind.DIRECT_SELF_RECURSION) {
+            stackPattern = RecurrenceSupport.unifiedStackPatternFromIdentity(
+                    entryMethod, entryIdentity);
+        }
         ComplexityExpr stack = RecurrenceSupport.recursionStackDepth(stackPattern, state.primarySizeVariable());
         if (stackPattern == ArgumentPattern.UNSUPPORTED
-                && !RecurrenceSupport.directSelfCalls(entryMethod, entryMethod.getNameAsString()).isEmpty()) {
+                && !DirectRecurrenceAnalyzer.directSelfCalls(entryMethod, entryIdentity).isEmpty()) {
             stack = new ComplexityExpr.Unknown("recursion stack depth unknown");
         }
 
@@ -780,10 +836,7 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeBlockSpacePeak(
             BlockStmt block,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             boolean disjointNestedScope) {
         ComplexityExpr scopeLive = ComplexityExpr.one();
         ComplexityExpr nestedDisjointPeak = ComplexityExpr.one();
@@ -793,14 +846,14 @@ public class JavaStaticAnalyzer {
                     if (variable.getInitializer().isPresent()) {
                         registerLocalSizeAlias(variable.getNameAsString(), variable.getInitializer().get(), state);
                         ComplexityExpr alloc = allocationSize(
-                                variable.getInitializer().get(), state, methodIndex, memo, visitStates, currentMethod);
+                                variable.getInitializer().get(), state, ipc, currentMethod);
                         scopeLive = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeLive, alloc)));
                     }
                 }
                 continue;
             }
             ComplexityExpr stmtPeak = analyzeStatementSpacePeak(
-                    statement, state, methodIndex, memo, visitStates, currentMethod, disjointNestedScope);
+                    statement, state, ipc, currentMethod, disjointNestedScope);
             nestedDisjointPeak = ComplexityExprSimplifier.branchWorstCase(nestedDisjointPeak, stmtPeak);
         }
         if (disjointNestedScope) {
@@ -812,45 +865,42 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeStatementSpacePeak(
             Statement statement,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod,
+            InterproceduralContext ipc, MethodIdentity currentMethod,
             boolean parentScope) {
         return switch (statement) {
-            case BlockStmt block -> analyzeBlockSpacePeak(block, state, methodIndex, memo, visitStates, currentMethod, true);
+            case BlockStmt block -> analyzeBlockSpacePeak(block, state, ipc, currentMethod, true);
             case ForStmt forStmt -> {
                 ComplexityExpr body = forStmt.getBody() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, visitStates, currentMethod, true)
-                        : analyzeStatementSpacePeak(forStmt.getBody(), state, methodIndex, memo, visitStates, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
+                        : analyzeStatementSpacePeak(forStmt.getBody(), state, ipc, currentMethod, parentScope);
                 yield body;
             }
             case ForEachStmt forEach -> {
                 ComplexityExpr body = forEach.getBody() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, visitStates, currentMethod, true)
-                        : analyzeStatementSpacePeak(forEach.getBody(), state, methodIndex, memo, visitStates, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
+                        : analyzeStatementSpacePeak(forEach.getBody(), state, ipc, currentMethod, parentScope);
                 yield body;
             }
             case WhileStmt whileStmt -> {
                 ComplexityExpr body = whileStmt.getBody() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, visitStates, currentMethod, true)
-                        : analyzeStatementSpacePeak(whileStmt.getBody(), state, methodIndex, memo, visitStates, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
+                        : analyzeStatementSpacePeak(whileStmt.getBody(), state, ipc, currentMethod, parentScope);
                 yield body;
             }
             case ReturnStmt returnStmt -> returnStmt.getExpression()
-                    .map(expr -> allocationSize(expr, state, methodIndex, memo, visitStates, currentMethod))
+                    .map(expr -> allocationSize(expr, state, ipc, currentMethod))
                     .orElse(ComplexityExpr.one());
             case ExpressionStmt expressionStmt -> expressionStmt.getExpression() == null
                     ? ComplexityExpr.one()
-                    : allocationSize(expressionStmt.getExpression(), state, methodIndex, memo, visitStates, currentMethod);
+                    : allocationSize(expressionStmt.getExpression(), state, ipc, currentMethod);
             case IfStmt ifStmt -> {
                 ComplexityExpr thenPeak = ifStmt.getThenStmt() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, methodIndex, memo, visitStates, currentMethod, true)
-                        : analyzeStatementSpacePeak(ifStmt.getThenStmt(), state, methodIndex, memo, visitStates, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
+                        : analyzeStatementSpacePeak(ifStmt.getThenStmt(), state, ipc, currentMethod, parentScope);
                 ComplexityExpr elsePeak = ifStmt.getElseStmt()
                         .map(s -> s instanceof BlockStmt b
-                                ? analyzeBlockSpacePeak(b, state, methodIndex, memo, visitStates, currentMethod, true)
-                                : analyzeStatementSpacePeak(s, state, methodIndex, memo, visitStates, currentMethod, parentScope))
+                                ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
+                                : analyzeStatementSpacePeak(s, state, ipc, currentMethod, parentScope))
                         .orElse(ComplexityExpr.one());
                 yield ComplexityExprSimplifier.branchWorstCase(thenPeak, elsePeak);
             }
@@ -864,19 +914,16 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr allocationSize(
             Expression expression,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod) {
+            InterproceduralContext ipc, MethodIdentity currentMethod) {
         if (expression instanceof ArrayCreationExpr array && !array.getLevels().isEmpty()) {
-            return arrayAllocationMagnitude(array, state, methodIndex, memo, visitStates, currentMethod);
+            return arrayAllocationMagnitude(array, state, ipc, currentMethod);
         }
         if (expression instanceof ObjectCreationExpr creation) {
             if (creation.getArguments().isEmpty()) {
                 return ComplexityExpr.one();
             }
             return sizeOrEvaluationCost(
-                    creation.getArguments().get(0), state, methodIndex, memo, visitStates, currentMethod);
+                    creation.getArguments().get(0), state, ipc, currentMethod);
         }
         if (expression instanceof VariableDeclarationExpr varDecl) {
             ComplexityExpr total = ComplexityExpr.one();
@@ -884,13 +931,13 @@ public class JavaStaticAnalyzer {
                 if (variable.getInitializer().isPresent()) {
                     total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                             total,
-                            allocationSize(variable.getInitializer().get(), state, methodIndex, memo, visitStates, currentMethod))));
+                            allocationSize(variable.getInitializer().get(), state, ipc, currentMethod))));
                 }
             }
             return total;
         }
         if (expression instanceof AssignExpr assign) {
-            return allocationSize(assign.getValue(), state, methodIndex, memo, visitStates, currentMethod);
+            return allocationSize(assign.getValue(), state, ipc, currentMethod);
         }
         return ComplexityExpr.one();
     }
@@ -898,17 +945,14 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr arrayAllocationMagnitude(
             ArrayCreationExpr array,
             AnalysisState state,
-            Map<String, MethodDeclaration> methodIndex,
-            Map<String, ComplexityExpr> memo,
-            Map<String, MethodVisitState> visitStates,
-            String currentMethod) {
+            InterproceduralContext ipc, MethodIdentity currentMethod) {
         List<ComplexityExpr> dimensions = new ArrayList<>();
         for (var level : array.getLevels()) {
             if (level.getDimension().isEmpty()) {
                 continue;
             }
             ComplexityExpr dim = sizeOrEvaluationCost(
-                    level.getDimension().get(), state, methodIndex, memo, visitStates, currentMethod);
+                    level.getDimension().get(), state, ipc, currentMethod);
             if (dim instanceof ComplexityExpr.Unknown) {
                 return dim;
             }
@@ -921,12 +965,6 @@ public class JavaStaticAnalyzer {
             return dimensions.getFirst();
         }
         return ComplexityExprSimplifier.simplify(new ComplexityExpr.Product(dimensions));
-    }
-
-    private enum MethodVisitState {
-        UNVISITED,
-        VISITING,
-        COMPLETE
     }
 
     private static Map<String, String> buildDeclaredTypes(CompilationUnit unit, MethodDeclaration entryMethod) {
@@ -971,6 +1009,8 @@ public class JavaStaticAnalyzer {
         final SymbolSizeResolver sizeResolver;
         final List<ParameterShapeRegistry.ParameterShape> parameterShapes;
         final EnumSet<StaticAnalysisReasonCode> reasonCodes = EnumSet.noneOf(StaticAnalysisReasonCode.class);
+        final Map<String, String> localNameToType = new HashMap<>();
+        String declaringTypeName = "Solution";
         AnalysisDimensionCompleteness timeCompleteness = AnalysisDimensionCompleteness.COMPLETE;
         AnalysisDimensionCompleteness spaceCompleteness = AnalysisDimensionCompleteness.COMPLETE;
         private boolean opaque;
@@ -991,6 +1031,65 @@ public class JavaStaticAnalyzer {
             this.compilationUnit = compilationUnit;
             this.paramTypes = buildDeclaredTypes(compilationUnit, entryMethod);
             this.parameterShapes = buildParameterShapes(metadata, entryMethod);
+            this.paramNameToSymbol = buildParamNameToSymbol(parameterShapes);
+            this.sizeResolver = new SymbolSizeResolver(parameterShapes);
+        }
+
+        void setAnalysisContext(String declaringTypeName, MethodIdentity entryIdentity) {
+            this.declaringTypeName = declaringTypeName;
+        }
+
+        void registerLocalType(String localName, String rawType) {
+            if (localName == null || localName.isBlank() || rawType == null) {
+                return;
+            }
+            localNameToType.put(localName, MethodIdentity.eraseType(rawType));
+        }
+
+        AnalysisState forkForRecurrenceSiblingPass() {
+            AnalysisState fork = new AnalysisState(
+                    findings,
+                    limitations,
+                    variables,
+                    compilationUnit,
+                    null,
+                    parameterShapes,
+                    paramTypes);
+            fork.declaringTypeName = declaringTypeName;
+            fork.localNameToType.putAll(localNameToType);
+            return fork;
+        }
+
+        AnalysisState forkForHelper(MethodDeclaration helper) {
+            List<ParameterShapeRegistry.ParameterShape> shapes =
+                    ParameterShapeRegistry.shapesFromParameters(helper.getParameters());
+            Map<String, String> helperVars = ParameterShapeRegistry.documentedVariables(shapes);
+            AnalysisState fork = new AnalysisState(
+                    findings,
+                    limitations,
+                    helperVars,
+                    compilationUnit,
+                    helper,
+                    shapes,
+                    buildDeclaredTypes(compilationUnit, helper));
+            fork.declaringTypeName = declaringTypeName;
+            return fork;
+        }
+
+        private AnalysisState(
+                List<StaticFindingDraft> findings,
+                List<String> limitations,
+                Map<String, String> variables,
+                CompilationUnit compilationUnit,
+                MethodDeclaration methodForParams,
+                List<ParameterShapeRegistry.ParameterShape> shapes,
+                Map<String, String> declaredParamTypes) {
+            this.findings = findings;
+            this.limitations = limitations;
+            this.variables = variables;
+            this.compilationUnit = compilationUnit;
+            this.paramTypes = declaredParamTypes;
+            this.parameterShapes = shapes;
             this.paramNameToSymbol = buildParamNameToSymbol(parameterShapes);
             this.sizeResolver = new SymbolSizeResolver(parameterShapes);
         }
