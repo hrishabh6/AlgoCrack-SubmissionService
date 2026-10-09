@@ -4,6 +4,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.Co
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
 import org.springframework.stereotype.Component;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -11,40 +12,36 @@ import java.util.Optional;
 @Component
 public class JdkKnowledgeBase {
 
-    public static final String VERSION = "jdk21-v3";
+    public static final String VERSION = "jdk21-v4";
 
-    private final List<JdkKnowledgeEntry> entries = List.of(
-            entry("java.util.Arrays.sort", "21", ComplexityBoundBasis.WORST_CASE,
-                    ComplexityExpr.nLogN("n"), ComplexityExpr.one(), "int[] or Object[] length n", "Sort full array", 1),
-            entry("java.util.Collections.sort", "21", ComplexityBoundBasis.WORST_CASE,
-                    ComplexityExpr.nLogN("n"), ComplexityExpr.one(), "list size n", "Sort list", 1),
-            entry("java.util.HashMap.get", "21", ComplexityBoundBasis.EXPECTED_ASSUMPTION,
-                    ComplexityExpr.one(), ComplexityExpr.one(), "expected O(1)", "Hash map get", 1),
-            entry("java.util.HashMap.put", "21", ComplexityBoundBasis.EXPECTED_ASSUMPTION,
-                    ComplexityExpr.one(), ComplexityExpr.one(), "expected O(1)", "Hash map put", 2),
-            entry("java.util.HashSet.contains", "21", ComplexityBoundBasis.EXPECTED_ASSUMPTION,
-                    ComplexityExpr.one(), ComplexityExpr.one(), "expected O(1)", "Hash set contains", 1),
-            entry("java.util.PriorityQueue.offer", "21", ComplexityBoundBasis.WORST_CASE,
-                    new ComplexityExpr.Log(new ComplexityExpr.Variable("n")), ComplexityExpr.one(), "heap size n", "Heap insert", 1),
-            entry("java.util.PriorityQueue.poll", "21", ComplexityBoundBasis.WORST_CASE,
-                    new ComplexityExpr.Log(new ComplexityExpr.Variable("n")), ComplexityExpr.one(), "heap size n", "Heap extract", -1),
-            entry("java.lang.String.length", "21", ComplexityBoundBasis.WORST_CASE,
-                    ComplexityExpr.one(), ComplexityExpr.one(), "", "Constant", 0),
-            entry("java.util.Arrays.copyOf", "21", ComplexityBoundBasis.WORST_CASE,
-                    ComplexityExpr.var("n"), ComplexityExpr.var("n"), "copy length n", "Array copy", 2));
+    private final List<JdkKnowledgeEntry> entries = JdkOperationCatalog.all();
 
     public String version() {
         return VERSION;
     }
 
-    public Optional<JdkKnowledgeEntry> matchQualified(JdkCallTarget target, String methodName, int argumentCount) {
-        String key = (target.qualifiedType() + "." + methodName).toLowerCase(Locale.ROOT);
+    public Optional<JdkKnowledgeEntry> matchOperation(
+            JdkCallTarget target,
+            String methodName,
+            List<String> inferredParameterTypes) {
+        if (inferredParameterTypes.stream().anyMatch(t -> "unknown".equals(t))) {
+            return Optional.empty();
+        }
         for (JdkKnowledgeEntry entry : entries) {
-            String pattern = entry.pattern().toLowerCase(Locale.ROOT);
-            if (!key.equals(pattern)) {
+            JdkOperationIdentity op = entry.operation();
+            if (!op.qualifiedOwner().equalsIgnoreCase(target.qualifiedType())) {
                 continue;
             }
-            if (entry.requiredArgumentCount() >= 0 && entry.requiredArgumentCount() != argumentCount) {
+            if (!op.methodName().equals(methodName)) {
+                continue;
+            }
+            if (op.staticMethod() != target.staticCall()) {
+                continue;
+            }
+            if (op.parameterTypes().size() != inferredParameterTypes.size()) {
+                continue;
+            }
+            if (!signatureMatches(op.parameterTypes(), inferredParameterTypes)) {
                 continue;
             }
             return Optional.of(entry);
@@ -52,15 +49,86 @@ public class JdkKnowledgeBase {
         return Optional.empty();
     }
 
-    private static JdkKnowledgeEntry entry(
-            String pattern,
-            String jdk,
+    /** @deprecated Batch 2 arity-only matching */
+    @Deprecated
+    public Optional<JdkKnowledgeEntry> matchQualified(JdkCallTarget target, String methodName, int argumentCount) {
+        for (JdkKnowledgeEntry entry : entries) {
+            JdkOperationIdentity op = entry.operation();
+            if (!op.qualifiedOwner().equalsIgnoreCase(target.qualifiedType())) {
+                continue;
+            }
+            if (!op.methodName().equals(methodName)) {
+                continue;
+            }
+            if (op.staticMethod() != target.staticCall()) {
+                continue;
+            }
+            if (op.parameterTypes().size() == argumentCount) {
+                return Optional.of(entry);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean signatureMatches(List<String> expected, List<String> inferred) {
+        for (int i = 0; i < expected.size(); i++) {
+            if (!typeCompatible(expected.get(i), inferred.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean typeCompatible(String expected, String inferred) {
+        String e = expected.toLowerCase(Locale.ROOT);
+        String i = inferred.toLowerCase(Locale.ROOT);
+        if (e.equals(i)) {
+            return true;
+        }
+        if (e.equals("object") || i.equals("object")) {
+            return true;
+        }
+        if (simple(e).equals("list") && simple(i).equals("list")) {
+            return true;
+        }
+        if (e.endsWith("[]") && i.endsWith("[]")) {
+            return typeCompatible(e.substring(0, e.length() - 2), i.substring(0, i.length() - 2));
+        }
+        return false;
+    }
+
+    private static String simple(String type) {
+        String t = type.toLowerCase(Locale.ROOT);
+        int dot = t.lastIndexOf('.');
+        return dot >= 0 ? t.substring(dot + 1) : t;
+    }
+
+    static ComplexityExpr tv(JdkTemplateVariable variable) {
+        return ComplexityExpr.var(variable.symbol());
+    }
+
+    static ComplexityExpr logVar(JdkTemplateVariable variable) {
+        return new ComplexityExpr.Log(tv(variable));
+    }
+
+    static JdkKnowledgeEntry op(
+            String owner,
+            String method,
+            boolean staticMethod,
+            List<String> params,
             ComplexityBoundBasis basis,
             ComplexityExpr time,
             ComplexityExpr alloc,
-            String assumptions,
-            String note,
-            int requiredArgumentCount) {
-        return new JdkKnowledgeEntry(pattern, jdk, basis, time, alloc, assumptions, note, requiredArgumentCount);
+            EnumSet<JdkTemplateVariable> roles,
+            boolean comparatorProof,
+            String note) {
+        return new JdkKnowledgeEntry(
+                new JdkOperationIdentity(owner, method, staticMethod, params),
+                basis,
+                time,
+                alloc,
+                roles,
+                comparatorProof,
+                note);
     }
 }
