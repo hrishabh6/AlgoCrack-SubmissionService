@@ -235,6 +235,66 @@ class ComplexityWorklistBatch5Test {
     }
 
     @Test
+    void opaqueMarkerMutationInvalidatesAdmission() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int n) {
+                    boolean[] seen = new boolean[n];
+                    java.util.ArrayDeque<Integer> q = new java.util.ArrayDeque<>();
+                    q.offer(0);
+                    while (!q.isEmpty()) {
+                      int current = q.poll();
+                      mutate(seen);
+                      int next = current + 1;
+                      if (next < n && !seen[next]) {
+                        seen[next] = true;
+                        q.offer(next);
+                      }
+                    }
+                    return 0;
+                  }
+                  void mutate(boolean[] seen) {}
+                }
+                """, meta("n", "int"));
+        assertEquals("UNKNOWN", time(result));
+        assertEquals("UNKNOWN", space(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.WORKLIST_MUTATION_UNRESOLVED));
+    }
+
+    @Test
+    void opaqueGridMarkerMutationInvalidatesAdmission() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int[][] matrix) {
+                    int rows = matrix.length;
+                    int cols = matrix[0].length;
+                    boolean[][] seen = new boolean[rows][cols];
+                    java.util.ArrayDeque<int[]> q = new java.util.ArrayDeque<>();
+                    int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                    q.offer(new int[]{0, 0});
+                    while (!q.isEmpty()) {
+                      int[] cur = q.poll();
+                      mutate(seen);
+                      for (int[] d : dirs) {
+                        int nr = cur[0] + d[0];
+                        int nc = cur[1] + d[1];
+                        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !seen[nr][nc]) {
+                          seen[nr][nc] = true;
+                          q.offer(new int[]{nr, nc});
+                        }
+                      }
+                    }
+                    return 0;
+                  }
+                  void mutate(boolean[][] seen) {}
+                }
+                """, meta("matrix", "int[][]"));
+        assertEquals("UNKNOWN", time(result));
+        assertEquals("UNKNOWN", space(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.WORKLIST_MUTATION_UNRESOLVED));
+    }
+
+    @Test
     void opaqueQueueMutationStaysUnknown() {
         StaticAnalysisResult result = analyze("""
                 class Solution {

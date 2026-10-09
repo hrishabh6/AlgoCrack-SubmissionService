@@ -493,6 +493,9 @@ public class JavaStaticAnalyzer {
             int depth) {
         if (structural.proof().isEmpty()) {
             state.markUnknownLoop(structural.failure());
+            if (unprovenRetainedWorklist(structural.failure())) {
+                state.spaceCompleteness = AnalysisDimensionCompleteness.INCOMPLETE;
+            }
             whileBodyCost(whileStmt, state, ipc, currentMethod, depth);
             return new ComplexityExpr.Unknown("worklist");
         }
@@ -510,6 +513,16 @@ public class JavaStaticAnalyzer {
         } finally {
             state.structuralCardinality.remove(proof.containerName());
         }
+    }
+
+    private static boolean unprovenRetainedWorklist(StaticAnalysisReasonCode code) {
+        return switch (code) {
+            case WORKLIST_CONSUMPTION_NOT_PROVEN, WORKLIST_MUTATION_UNRESOLVED, WORKLIST_ADMISSION_NOT_BOUNDED,
+                    WORKLIST_DUPLICATE_ADMISSION_POSSIBLE, ADMISSION_STATE_IDENTITY_UNRESOLVED,
+                    VISITED_MARKER_NOT_MONOTONIC, WORKLIST_STATE_UNIVERSE_UNRESOLVED,
+                    WORKLIST_CARDINALITY_UNRESOLVED, WORKLIST_CONTAINER_UNRESOLVED -> true;
+            default -> false;
+        };
     }
 
     private ComplexityExpr whileBodyCost(
