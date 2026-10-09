@@ -85,6 +85,39 @@ class ComplexityWorklistBatch5Test {
     }
 
     @Test
+    void countedBoundarySeedsRemainRectangular() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int[][] matrix) {
+                    int rows = matrix.length;
+                    int cols = matrix[0].length;
+                    boolean[][] seen = new boolean[rows][cols];
+                    java.util.ArrayDeque<int[]> q = new java.util.ArrayDeque<>();
+                    for (int c = 0; c < cols; c++) {
+                      q.offer(new int[]{0, c});
+                      seen[0][c] = true;
+                    }
+                    int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                    while (!q.isEmpty()) {
+                      int[] cur = q.poll();
+                      for (int[] d : dirs) {
+                        int nr = cur[0] + d[0];
+                        int nc = cur[1] + d[1];
+                        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !seen[nr][nc]) {
+                          seen[nr][nc] = true;
+                          q.offer(new int[]{nr, nc});
+                        }
+                      }
+                    }
+                    return 0;
+                  }
+                }
+                """, meta("matrix", "int[][]"));
+        assertEquals("O(n * m)", time(result));
+        assertEquals("O(n * m)", space(result));
+    }
+
+    @Test
     void symbolicInnerLoopIsPreserved() {
         StaticAnalysisResult result = analyze("""
                 class Solution {
