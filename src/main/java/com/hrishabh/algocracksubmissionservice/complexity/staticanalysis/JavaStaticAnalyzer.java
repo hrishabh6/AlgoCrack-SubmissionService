@@ -729,6 +729,10 @@ public class JavaStaticAnalyzer {
                     sizeParam,
                     stmt -> analyzeStatement(stmt, siblingState, ipc, currentMethod, 0),
                     expr -> sizeOrEvaluationCost(expr, siblingState, ipc, currentMethod));
+            if (siblingState.hasRecurrenceSiblingIncompleteness()) {
+                state.absorbRecurrenceSiblingIncompleteness(siblingState);
+                direct = Optional.empty();
+            }
             ComplexityExpr resolved;
             if (direct.isEmpty()) {
                 state.markTimeIncomplete(StaticAnalysisReasonCode.UNSUPPORTED_RECURRENCE);
@@ -1058,6 +1062,28 @@ public class JavaStaticAnalyzer {
             fork.declaringTypeName = declaringTypeName;
             fork.localNameToType.putAll(localNameToType);
             return fork;
+        }
+
+        boolean hasRecurrenceSiblingIncompleteness() {
+            return timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE
+                    || !reasonCodes.isEmpty()
+                    || hasOpaqueDependency()
+                    || hasUnknownLoop();
+        }
+
+        void absorbRecurrenceSiblingIncompleteness(AnalysisState sibling) {
+            for (StaticAnalysisReasonCode code : sibling.reasonCodes) {
+                markTimeIncomplete(code);
+            }
+            if (sibling.hasOpaqueDependency()) {
+                markOpaque("Recurrence sibling work incomplete");
+            }
+            if (sibling.hasUnknownLoop()) {
+                markUnknownLoop(StaticAnalysisReasonCode.UNKNOWN_LOOP_BOUND);
+            }
+            if (sibling.timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE && reasonCodes.isEmpty()) {
+                markTimeIncomplete(StaticAnalysisReasonCode.INCOMPLETE_TIME_ANALYSIS);
+            }
         }
 
         AnalysisState forkForHelper(MethodDeclaration helper) {

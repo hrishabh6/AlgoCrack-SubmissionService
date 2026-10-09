@@ -139,6 +139,102 @@ class ComplexityInterproceduralBatch2Test {
     }
 
     @Test
+    void singleCandidateDoesNotResolveKnownIncompatibleStringToIntArray() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(String s) { helper(s); return 0; }
+                  void helper(int[] x) { for (int i = 0; i < x.length; i++) {} }
+                }
+                """, metadata("s", "String"));
+        assertEquals("UNKNOWN", bigO(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.UNRESOLVED_HELPER_TARGET));
+    }
+
+    @Test
+    void singleCandidateDoesNotResolveKnownIncompatibleIntToString() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int n) { helper(n); return 0; }
+                  void helper(String x) { return; }
+                }
+                """, metadata("n", "int"));
+        assertEquals("UNKNOWN", bigO(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.UNRESOLVED_HELPER_TARGET));
+    }
+
+    @Test
+    void singleCandidateDoesNotResolveKnownIncompatibleIntArrayToInt() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int[] nums) { helper(nums); return 0; }
+                  void helper(int x) { for (int i = 0; i < x; i++) {} }
+                }
+                """, metadata("nums", "int[]"));
+        assertEquals("UNKNOWN", bigO(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.UNRESOLVED_HELPER_TARGET));
+    }
+
+    @Test
+    void singleCandidateResolvesWhenArgumentTypeMatches() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int[] nums) { helper(nums); return 0; }
+                  void helper(int[] x) { for (int i = 0; i < x.length; i++) {} }
+                }
+                """, metadata("nums", "int[]"));
+        assertEquals("O(n)", bigO(result));
+        assertEquals(ComplexityResultKind.STATIC_ONLY, result.resultKind());
+    }
+
+    @Test
+    void recurrenceUnknownWhenOpaqueSiblingBeforeDecrementCall() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int n) {
+                    if (n <= 1) return 0;
+                    externalUnknown(n);
+                    return solve(n - 1);
+                  }
+                }
+                """, metadata("n", "int"));
+        assertEquals("UNKNOWN", bigO(result));
+        assertNotEquals(ComplexityConfidence.HIGH, result.timeConfidence());
+    }
+
+    @Test
+    void recurrenceUnknownWhenOpaqueWorkOnPossibleBranchBeforeHalvingCall() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int n) {
+                    if (n <= 1) return 0;
+                    if (n > 2) {
+                      externalUnknown(n);
+                    }
+                    return solve(n / 2);
+                  }
+                }
+                """, metadata("n", "int"));
+        assertEquals("UNKNOWN", bigO(result));
+        assertNotEquals(ComplexityConfidence.HIGH, result.timeConfidence());
+    }
+
+    @Test
+    void recurrenceUnknownWhenRecursiveMethodCallsHelperWithOpaqueWork() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int n) {
+                    if (n <= 1) return 0;
+                    helperWithOpaque(n);
+                    return solve(n - 1);
+                  }
+                  void helperWithOpaque(int n) { externalUnknown(n); }
+                }
+                """, metadata("n", "int"));
+        assertEquals("UNKNOWN", bigO(result));
+        assertNotEquals(ComplexityConfidence.HIGH, result.timeConfidence());
+    }
+
+    @Test
     void recursiveStackDepthDecrementIsN() {
         StaticAnalysisResult result = analyze("""
                 class Solution {

@@ -61,8 +61,7 @@ public final class UserMethodOverloadResolver {
             return Resolution.unresolved();
         }
         if (arityMatches.size() == 1) {
-            MethodIdentity id = arityMatches.get(0);
-            return Resolution.resolved(id, index.declaration(id).orElseThrow());
+            return resolveSingleArityCandidate(call, arityMatches.get(0), index, localNameToType, parameterNameToType);
         }
         List<MethodIdentity> applicable = new ArrayList<>();
         for (MethodIdentity candidate : arityMatches) {
@@ -82,6 +81,35 @@ public final class UserMethodOverloadResolver {
             return Resolution.resolved(mostSpecific, index.declaration(mostSpecific).orElseThrow());
         }
         return Resolution.ambiguous();
+    }
+
+    private static Resolution resolveSingleArityCandidate(
+            MethodCallExpr call,
+            MethodIdentity candidate,
+            UserMethodIndex index,
+            Map<String, String> localNameToType,
+            Map<String, String> parameterNameToType) {
+        List<String> parameterTypes = candidate.parameterTypes();
+        boolean anyInferred = false;
+        boolean allInferred = true;
+        for (int i = 0; i < call.getArguments().size(); i++) {
+            Optional<String> argType = inferArgumentType(call.getArgument(i), localNameToType, parameterNameToType);
+            if (argType.isEmpty()) {
+                allInferred = false;
+                continue;
+            }
+            anyInferred = true;
+            if (!isConvertible(argType.get(), parameterTypes.get(i))) {
+                return Resolution.unresolved();
+            }
+        }
+        if (anyInferred && allInferred) {
+            return Resolution.resolved(candidate, index.declaration(candidate).orElseThrow());
+        }
+        if (!anyInferred) {
+            return Resolution.resolved(candidate, index.declaration(candidate).orElseThrow());
+        }
+        return Resolution.unresolved();
     }
 
     private static boolean argumentsMatchParameters(
