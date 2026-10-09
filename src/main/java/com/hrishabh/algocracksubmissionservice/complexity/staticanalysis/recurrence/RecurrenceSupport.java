@@ -88,10 +88,18 @@ public final class RecurrenceSupport {
 
     public static ComplexityExpr totalTime(ArgumentPattern pattern, ComplexityExpr siblingWorkPerLevel, String sizeVar) {
         return switch (pattern) {
-            case LINEAR_DECREMENT -> ComplexityExpr.var(sizeVar);
+            case LINEAR_DECREMENT -> linearDecrementTotal(siblingWorkPerLevel, sizeVar);
             case HALVE -> halveRecurrenceTotal(siblingWorkPerLevel, sizeVar);
             case UNSUPPORTED -> new ComplexityExpr.Unknown("unsupported recursion");
         };
+    }
+
+    private static ComplexityExpr linearDecrementTotal(ComplexityExpr siblingWorkPerLevel, String sizeVar) {
+        ComplexityExpr simplified = ComplexityExprSimplifier.simplify(siblingWorkPerLevel);
+        if (simplified instanceof ComplexityExpr.Constant c && c.value() <= 1) {
+            return ComplexityExpr.var(sizeVar);
+        }
+        return new ComplexityExpr.Unknown("linear-decrement recurrence with unproven sibling work");
     }
 
     public static ComplexityExpr recursionStackDepth(ArgumentPattern pattern, String sizeVar) {

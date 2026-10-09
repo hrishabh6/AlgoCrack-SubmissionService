@@ -5,7 +5,9 @@ import com.hrishabh.algocracksubmissionservice.complexity.inference.GrowthCandid
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityConfidence;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResultKind;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.AnalysisDimensionCompleteness;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisReasonCode;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisResult;
 import org.junit.jupiter.api.Test;
 
@@ -13,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ComplexityReconciliationEngineTest {
@@ -72,6 +75,64 @@ class ComplexityReconciliationEngineTest {
         assertEquals(ComplexityResultKind.EMPIRICAL_ONLY, outcome.resultKind());
     }
 
+    @Test
+    void inconclusiveStaticWithAgreeingDynamicNeverHybrid() {
+        StaticAnalysisResult stat = staticInconclusiveWithDiagnosticO(n());
+        ReconciliationOutcome outcome = engine.reconcile(new ReconciliationInput(
+                stat,
+                new DynamicGrowthInferenceResult(GrowthCandidateFamily.O_N, "DYNAMIC_FIT", List.of(), false),
+                GrowthCandidateFamily.O_N,
+                true,
+                false,
+                List.of()));
+        assertNotEquals(ComplexityResultKind.HYBRID, outcome.resultKind());
+        assertNotEquals(ComplexityResultKind.STATIC_ONLY, outcome.resultKind());
+    }
+
+    @Test
+    void unsupportedStaticWithAgreeingDynamicNeverHybrid() {
+        StaticAnalysisResult stat = staticUnsupportedWithDiagnosticO(n());
+        ReconciliationOutcome outcome = engine.reconcile(new ReconciliationInput(
+                stat,
+                new DynamicGrowthInferenceResult(GrowthCandidateFamily.O_N, "DYNAMIC_FIT", List.of(), false),
+                GrowthCandidateFamily.O_N,
+                true,
+                false,
+                List.of()));
+        assertNotEquals(ComplexityResultKind.HYBRID, outcome.resultKind());
+        assertNotEquals(ComplexityResultKind.STATIC_ONLY, outcome.resultKind());
+    }
+
+    @Test
+    void inconclusiveStaticWithoutDynamicStaysInconclusive() {
+        StaticAnalysisResult stat = staticInconclusiveWithDiagnosticO(n());
+        ReconciliationOutcome outcome = engine.reconcile(new ReconciliationInput(
+                stat,
+                DynamicGrowthInferenceResult.inconclusive("BENCHMARK_INSUFFICIENT_POINTS", List.of()),
+                GrowthCandidateFamily.INCONCLUSIVE,
+                true,
+                false,
+                List.of()));
+        assertEquals(ComplexityResultKind.INCONCLUSIVE, outcome.resultKind());
+    }
+
+    @Test
+    void unsupportedStaticWithoutBenchmarkStaysInconclusive() {
+        StaticAnalysisResult stat = staticUnsupportedWithDiagnosticO(n());
+        ReconciliationOutcome outcome = engine.reconcile(new ReconciliationInput(
+                stat,
+                DynamicGrowthInferenceResult.inconclusive("PROFILE_UNAVAILABLE", List.of()),
+                GrowthCandidateFamily.INCONCLUSIVE,
+                false,
+                false,
+                List.of()));
+        assertEquals(ComplexityResultKind.INCONCLUSIVE, outcome.resultKind());
+    }
+
+    private static ComplexityExpr.Variable n() {
+        return new ComplexityExpr.Variable("n");
+    }
+
     private static StaticAnalysisResult staticWithTime(String bigO) {
         ComplexityExpr expr = switch (bigO) {
             case "O(n)" -> new ComplexityExpr.Variable("n");
@@ -91,6 +152,10 @@ class ComplexityReconciliationEngineTest {
                 List.of(),
                 List.of("OPAQUE_CALLS"),
                 List.of(),
+                null,
+                List.of(),
+                AnalysisDimensionCompleteness.COMPLETE,
+                AnalysisDimensionCompleteness.COMPLETE,
                 null);
     }
 
@@ -106,6 +171,48 @@ class ComplexityReconciliationEngineTest {
                 List.of(),
                 List.of("OPAQUE_CALLS"),
                 List.of(),
+                null,
+                List.of(StaticAnalysisReasonCode.OPAQUE_CALL),
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                AnalysisDimensionCompleteness.INCOMPLETE,
                 null);
+    }
+
+    private static StaticAnalysisResult staticInconclusiveWithDiagnosticO(ComplexityExpr diagnostic) {
+        return new StaticAnalysisResult(
+                ComplexityResultKind.INCONCLUSIVE,
+                new ComplexityExpr.Unknown("INCOMPLETE_TIME_ANALYSIS"),
+                ComplexityBoundBasis.WORST_CASE,
+                ComplexityConfidence.LOW,
+                null,
+                null,
+                Map.of("n", "input size"),
+                List.of(),
+                List.of("OPAQUE_CALLS"),
+                List.of(),
+                null,
+                List.of(StaticAnalysisReasonCode.OPAQUE_CALL),
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                AnalysisDimensionCompleteness.COMPLETE,
+                diagnostic);
+    }
+
+    private static StaticAnalysisResult staticUnsupportedWithDiagnosticO(ComplexityExpr diagnostic) {
+        return new StaticAnalysisResult(
+                ComplexityResultKind.UNSUPPORTED,
+                new ComplexityExpr.Unknown("INCOMPLETE_TIME_ANALYSIS"),
+                ComplexityBoundBasis.WORST_CASE,
+                null,
+                null,
+                null,
+                Map.of("n", "input size"),
+                List.of(),
+                List.of(),
+                List.of(),
+                "STATIC_NOT_AUTHORITATIVE",
+                List.of(StaticAnalysisReasonCode.INCOMPLETE_TIME_ANALYSIS),
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                diagnostic);
     }
 }

@@ -5,7 +5,9 @@ import com.hrishabh.algocracksubmissionservice.complexity.inference.GrowthCandid
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityConfidence;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResultKind;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.AnalysisDimensionCompleteness;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisReasonCode;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisResult;
 import org.junit.jupiter.api.Test;
 
@@ -67,6 +69,10 @@ class ComplexityHybridConfidenceModelTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                null,
+                List.of(),
+                AnalysisDimensionCompleteness.COMPLETE,
+                AnalysisDimensionCompleteness.COMPLETE,
                 null);
     }
 
@@ -82,6 +88,10 @@ class ComplexityHybridConfidenceModelTest {
                 List.of(),
                 List.of("OPAQUE_CALLS"),
                 List.of(),
+                null,
+                List.of(StaticAnalysisReasonCode.OPAQUE_CALL),
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                AnalysisDimensionCompleteness.INCOMPLETE,
                 null);
     }
 }

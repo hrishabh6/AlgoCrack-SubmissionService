@@ -5,7 +5,6 @@ import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResult
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 
 import java.util.List;
-import java.util.Map;
 
 public record StaticAnalysisResult(
         ComplexityResultKind resultKind,
@@ -14,13 +13,46 @@ public record StaticAnalysisResult(
         ComplexityConfidence timeConfidence,
         ComplexityExpr spaceExpression,
         ComplexityConfidence spaceConfidence,
-        Map<String, String> variables,
+        java.util.Map<String, String> variables,
         List<StaticFindingDraft> findings,
         List<String> limitations,
         List<String> evidenceSummaries,
-        String errorCode) {
+        String errorCode,
+        List<StaticAnalysisReasonCode> reasonCodes,
+        AnalysisDimensionCompleteness timeCompleteness,
+        AnalysisDimensionCompleteness spaceCompleteness,
+        ComplexityExpr diagnosticTimeExpression) {
+
+    public StaticAnalysisResult {
+        if (reasonCodes == null) {
+            reasonCodes = List.of();
+        }
+        if (timeCompleteness == null) {
+            timeCompleteness = AnalysisDimensionCompleteness.COMPLETE;
+        }
+        if (spaceCompleteness == null) {
+            spaceCompleteness = AnalysisDimensionCompleteness.COMPLETE;
+        }
+    }
 
     public boolean hasResponsibleTimeEstimate() {
-        return timeExpression != null && !(timeExpression instanceof ComplexityExpr.Unknown);
+        return hasAuthoritativeStaticTime();
+    }
+
+    /**
+     * Authoritative static time bound suitable for reconciliation family extraction.
+     */
+    public boolean hasAuthoritativeStaticTime() {
+        return resultKind == ComplexityResultKind.STATIC_ONLY
+                && timeCompleteness == AnalysisDimensionCompleteness.COMPLETE
+                && timeExpression != null
+                && !(timeExpression instanceof ComplexityExpr.Unknown)
+                && reasonCodes.isEmpty();
+    }
+
+    public boolean hasAuthoritativeStaticSpace() {
+        return spaceCompleteness == AnalysisDimensionCompleteness.COMPLETE
+                && spaceExpression != null
+                && !(spaceExpression instanceof ComplexityExpr.Unknown);
     }
 }

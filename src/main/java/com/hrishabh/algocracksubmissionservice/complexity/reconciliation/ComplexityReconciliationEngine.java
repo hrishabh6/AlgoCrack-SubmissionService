@@ -21,7 +21,8 @@ public class ComplexityReconciliationEngine {
         StaticAnalysisResult stat = input.staticResult();
         DynamicGrowthInferenceResult dynamic = input.dynamicResult();
 
-        String staticBigO = stat.timeExpression() != null
+        boolean authoritativeStatic = stat.hasAuthoritativeStaticTime();
+        String staticBigO = authoritativeStatic && stat.timeExpression() != null
                 ? ComplexityExprSimplifier.toBigOString(stat.timeExpression())
                 : null;
         Optional<GrowthCandidateFamily> staticFamily = GrowthCandidateFamily.fromStaticBigO(staticBigO);
@@ -30,28 +31,28 @@ public class ComplexityReconciliationEngine {
 
         if (dynamic != null && dynamic.multiDimensionalInconclusive()) {
             limitations.add("MULTI_DIMENSIONAL_INCONCLUSIVE");
-            return staticWithLimitations(stat, limitations, ComplexityConfidence.MEDIUM);
+            return boundedStaticOutcome(stat, limitations, ComplexityConfidence.LOW);
         }
 
         if (!input.benchmarkAttempted()) {
-            return staticOnly(stat, limitations);
+            return staticOnlyOutcome(stat, limitations);
         }
 
         if (input.benchmarkInfrastructureFailure()) {
             limitations.add("PROFILE_INFRASTRUCTURE_UNAVAILABLE");
-            return staticWithLimitations(stat, limitations, stat.timeConfidence());
+            return boundedStaticOutcome(stat, limitations, stat.timeConfidence());
         }
 
         if (!dynamicKnown) {
-            if (staticFamily.isPresent()) {
+            if (authoritativeStatic && staticFamily.isPresent()) {
                 limitations.add(dynamic != null ? dynamic.reasonCode() : "BENCHMARK_INSUFFICIENT_POINTS");
-                return staticWithLimitations(stat, limitations, stat.timeConfidence());
+                return boundedStaticOutcome(stat, limitations, stat.timeConfidence());
             }
             reasons.add("BENCHMARK_INSUFFICIENT_POINTS");
-            return inconclusive(stat, limitations, reasons);
+            return inconclusiveOutcome(stat, limitations, reasons);
         }
 
-        if (staticFamily.isEmpty()) {
+        if (!authoritativeStatic || staticFamily.isEmpty()) {
             reasons.add("EMPIRICAL_DYNAMIC");
             return new ReconciliationOutcome(
                     ComplexityResultKind.EMPIRICAL_ONLY,
@@ -75,14 +76,16 @@ public class ComplexityReconciliationEngine {
 
         reasons.add("STATIC_DYNAMIC_CONFLICT");
         limitations.add("STATIC_DYNAMIC_CONFLICT");
-        return inconclusive(stat, limitations, reasons);
+        return inconclusiveOutcome(stat, limitations, reasons);
     }
 
-    private ReconciliationOutcome staticOnly(StaticAnalysisResult stat, List<String> limitations) {
+    private ReconciliationOutcome staticOnlyOutcome(StaticAnalysisResult stat, List<String> limitations) {
+        ComplexityResultKind kind = stat.resultKind();
+        if (kind == ComplexityResultKind.UNSUPPORTED || kind == ComplexityResultKind.INCONCLUSIVE) {
+            return inconclusiveOutcome(stat, limitations, List.of("STATIC_NOT_AUTHORITATIVE"));
+        }
         return new ReconciliationOutcome(
-                stat.resultKind() == ComplexityResultKind.INCONCLUSIVE
-                        ? ComplexityResultKind.INCONCLUSIVE
-                        : ComplexityResultKind.STATIC_ONLY,
+                ComplexityResultKind.STATIC_ONLY,
                 stat.timeConfidence(),
                 stat.timeExpression() != null ? ComplexityExprSimplifier.toBigOString(stat.timeExpression()) : null,
                 stat.timeExpression() != null ? ComplexityExprSimplifier.toExpressionString(stat.timeExpression()) : null,
@@ -90,26 +93,28 @@ public class ComplexityReconciliationEngine {
                 limitations);
     }
 
-    private ReconciliationOutcome staticWithLimitations(
+    private ReconciliationOutcome boundedStaticOutcome(
             StaticAnalysisResult stat, List<String> limitations, ComplexityConfidence confidence) {
+        if (!stat.hasAuthoritativeStaticTime()) {
+            return inconclusiveOutcome(stat, limitations, List.of("STATIC_WITH_BENCHMARK_LIMITATION"));
+        }
         return new ReconciliationOutcome(
                 ComplexityResultKind.STATIC_ONLY,
                 confidence,
-                stat.timeExpression() != null ? ComplexityExprSimplifier.toBigOString(stat.timeExpression()) : null,
-                stat.timeExpression() != null ? ComplexityExprSimplifier.toExpressionString(stat.timeExpression()) : null,
+                ComplexityExprSimplifier.toBigOString(stat.timeExpression()),
+                ComplexityExprSimplifier.toExpressionString(stat.timeExpression()),
                 List.of("STATIC_WITH_BENCHMARK_LIMITATION"),
                 limitations);
     }
 
-    private ReconciliationOutcome inconclusive(
+    private ReconciliationOutcome inconclusiveOutcome(
             StaticAnalysisResult stat, List<String> limitations, List<String> reasons) {
         return new ReconciliationOutcome(
                 ComplexityResultKind.INCONCLUSIVE,
                 null,
-                stat.timeExpression() != null ? ComplexityExprSimplifier.toBigOString(stat.timeExpression()) : null,
-                stat.timeExpression() != null ? ComplexityExprSimplifier.toExpressionString(stat.timeExpression()) : null,
+                null,
+                null,
                 reasons,
                 limitations);
     }
-
 }

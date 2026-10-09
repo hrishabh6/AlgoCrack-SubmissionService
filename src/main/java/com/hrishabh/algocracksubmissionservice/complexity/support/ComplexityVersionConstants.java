@@ -3,7 +3,7 @@ package com.hrishabh.algocracksubmissionservice.complexity.support;
 public final class ComplexityVersionConstants {
 
     public static final String DYNAMIC_INFERENCE_VERSION = "growth-fit-v1";
-    public static final String RECONCILIATION_VERSION = "reconcile-v1";
+    public static final String RECONCILIATION_VERSION = "reconcile-v2-dev";
     public static final String MEASUREMENT_POLICY_VERSION = "measure-v1";
     public static final String HYBRID_CONFIDENCE_MODEL_VERSION = "hybrid-confidence-v1";
     public static final String DEFAULT_HARNESS_VERSION = "profile-harness-v1";

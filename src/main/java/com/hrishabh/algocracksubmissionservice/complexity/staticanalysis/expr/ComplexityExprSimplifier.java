@@ -281,11 +281,8 @@ public final class ComplexityExprSimplifier {
     public static ComplexityExpr branchWorstCase(ComplexityExpr left, ComplexityExpr right) {
         left = simplify(left);
         right = simplify(right);
-        if (left instanceof ComplexityExpr.Unknown) {
-            return right;
-        }
-        if (right instanceof ComplexityExpr.Unknown) {
-            return left;
+        if (left instanceof ComplexityExpr.Unknown || right instanceof ComplexityExpr.Unknown) {
+            return new ComplexityExpr.Unknown("unknown possible branch");
         }
         if (structurallyEqual(left, right)) {
             return left;
