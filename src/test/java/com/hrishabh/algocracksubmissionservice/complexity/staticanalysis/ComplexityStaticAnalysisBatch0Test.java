@@ -264,8 +264,8 @@ class ComplexityStaticAnalysisBatch0Test {
 
     @Test
     void analyzerVersionIsBatch0Dev() {
-        assertEquals("static-v2.0-dev", JavaStaticAnalyzer.ANALYZER_VERSION);
-        assertEquals("static-confidence-v2-dev", JavaStaticAnalyzer.CONFIDENCE_MODEL_VERSION);
+        assertEquals("static-v2.1-dev", JavaStaticAnalyzer.ANALYZER_VERSION);
+        assertEquals("static-confidence-v2.1-dev", JavaStaticAnalyzer.CONFIDENCE_MODEL_VERSION);
     }
 
     @ParameterizedTest(name = "{0}")

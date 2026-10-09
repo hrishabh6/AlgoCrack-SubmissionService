@@ -12,7 +12,9 @@ import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.*;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityConfidence;
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResultKind;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.context.ParameterShapeRegistry;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.context.ParameterVariableMapper;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.context.SymbolSizeResolver;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExprSimplifier;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallTarget;
@@ -37,8 +39,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JavaStaticAnalyzer {
 
-    public static final String ANALYZER_VERSION = "static-v2.0-dev";
-    public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2-dev";
+    public static final String ANALYZER_VERSION = "static-v2.1-dev";
+    public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.1-dev";
 
     private static final int MAX_HELPER_ANALYSIS_DEPTH = 128;
 
@@ -116,6 +118,9 @@ public class JavaStaticAnalyzer {
             List<String> limitations,
             ComplexityExpr rawTime,
             ComplexityExpr rawSpace) {
+        validateDocumentedSymbols(state, rawTime, true);
+        validateDocumentedSymbols(state, rawSpace, false);
+
         ComplexityExpr diagnosticTime = ComplexityExprSimplifier.simplify(rawTime);
         ComplexityExpr diagnosticSpace = ComplexityExprSimplifier.simplify(rawSpace);
         ComplexityExpr authoritativeTime = diagnosticTime;
@@ -212,6 +217,20 @@ public class JavaStaticAnalyzer {
             evidence.add("Limitations: " + String.join(", ", state.limitations));
         }
         return evidence;
+    }
+
+    private static void validateDocumentedSymbols(AnalysisState state, ComplexityExpr expr, boolean timeAxis) {
+        if (expr == null || expr instanceof ComplexityExpr.Unknown) {
+            return;
+        }
+        ComplexityExpr simplified = ComplexityExprSimplifier.simplify(expr);
+        if (!ComplexityExprSimplifier.allVariablesDocumented(simplified, state.documentedSymbolKeys())) {
+            if (timeAxis) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.UNDEFINED_SYMBOL);
+            } else {
+                state.markSpaceIncomplete(StaticAnalysisReasonCode.UNDEFINED_SYMBOL);
+            }
+        }
     }
 
     private static Map<String, String> mergeVariables(QuestionMetadataApiDto metadata, MethodDeclaration entryMethod) {
@@ -494,42 +513,24 @@ public class JavaStaticAnalyzer {
     }
 
     private ComplexityExpr resolveIterableSize(Expression iterable, AnalysisState state) {
-        if (iterable instanceof NameExpr name) {
-            return ComplexityExpr.var(state.mapNameToVariable(name.getNameAsString()));
-        }
-        if (iterable instanceof FieldAccessExpr access && "length".equals(access.getNameAsString())) {
-            if (access.getScope() instanceof NameExpr nameExpr) {
-                return ComplexityExpr.var(state.mapNameToVariable(nameExpr.getNameAsString()));
-            }
-            return mapSizeExpression(access.getScope(), state).orElse(new ComplexityExpr.Unknown("length scope"));
-        }
-        return new ComplexityExpr.Unknown("iterable size");
+        return mapSizeExpression(iterable, state).orElse(new ComplexityExpr.Unknown("iterable size"));
     }
 
     private Optional<ComplexityExpr> mapSizeExpression(Expression expression, AnalysisState state) {
-        if (expression instanceof NameExpr name) {
-            String mapped = state.mapNameToVariable(name.getNameAsString());
-            return Optional.of(ComplexityExpr.var(mapped));
+        return state.sizeResolver.resolveSize(expression);
+    }
+
+    private static void registerLocalSizeAlias(String localName, Expression initializer, AnalysisState state) {
+        Optional<ComplexityExpr> size = state.sizeResolver.resolveSize(initializer);
+        if (size.isPresent()) {
+            state.sizeResolver.bindLocalAlias(localName, size.get());
+            return;
         }
-        if (expression instanceof FieldAccessExpr access) {
-            if ("length".equals(access.getNameAsString())) {
-                String scopeName = access.getScope() instanceof NameExpr nameExpr
-                        ? nameExpr.getNameAsString()
-                        : access.getScope().toString();
-                return Optional.of(ComplexityExpr.var(state.mapNameToVariable(scopeName)));
-            }
+        if (initializer instanceof NameExpr name) {
+            state.sizeResolver.resolveSize(name).ifPresent(s -> state.sizeResolver.bindLocalAlias(localName, s));
+            return;
         }
-        if (expression instanceof MethodCallExpr call && "size".equals(call.getNameAsString()) && call.getScope().isPresent()) {
-            Expression scope = call.getScope().get();
-            if (scope instanceof NameExpr name && state.paramNameToSymbol.containsKey(name.getNameAsString())) {
-                return Optional.of(ComplexityExpr.var(state.paramNameToSymbol.get(name.getNameAsString())));
-            }
-            return Optional.empty();
-        }
-        if (expression instanceof IntegerLiteralExpr literal) {
-            return Optional.of(new ComplexityExpr.Constant(Integer.parseInt(literal.getValue())));
-        }
-        return Optional.empty();
+        state.sizeResolver.invalidateLocal(localName);
     }
 
     private ComplexityExpr analyzeExpression(
@@ -561,9 +562,10 @@ public class JavaStaticAnalyzer {
                         analyzeExpression(binary.getRight(), state, methodIndex, memo, visitStates, currentMethod))));
             }
             if (binary.getOperator() == BinaryExpr.Operator.MULTIPLY) {
-                return ComplexityExprSimplifier.simplify(new ComplexityExpr.Product(List.of(
+                return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                         analyzeExpression(binary.getLeft(), state, methodIndex, memo, visitStates, currentMethod),
-                        analyzeExpression(binary.getRight(), state, methodIndex, memo, visitStates, currentMethod))));
+                        analyzeExpression(binary.getRight(), state, methodIndex, memo, visitStates, currentMethod),
+                        ComplexityExpr.one())));
             }
             if (isPureEvaluationBinary(binary.getOperator())) {
                 return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
@@ -586,14 +588,19 @@ public class JavaStaticAnalyzer {
             ComplexityExpr total = ComplexityExpr.one();
             for (VariableDeclarator variable : varDecl.getVariables()) {
                 if (variable.getInitializer().isPresent()) {
+                    Expression init = variable.getInitializer().get();
+                    registerLocalSizeAlias(variable.getNameAsString(), init, state);
                     total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                             total,
-                            analyzeExpression(variable.getInitializer().get(), state, methodIndex, memo, visitStates, currentMethod))));
+                            analyzeExpression(init, state, methodIndex, memo, visitStates, currentMethod))));
                 }
             }
             return total;
         }
         if (expression instanceof AssignExpr assign) {
+            if (assign.getTarget() instanceof NameExpr name) {
+                registerLocalSizeAlias(name.getNameAsString(), assign.getValue(), state);
+            }
             ComplexityExpr target = assign.getTarget() instanceof Expression targetExpr
                     ? analyzeExpression(targetExpr, state, methodIndex, memo, visitStates, currentMethod)
                     : ComplexityExpr.one();
@@ -615,11 +622,12 @@ public class JavaStaticAnalyzer {
             return size;
         }
         if (expression instanceof ArrayCreationExpr arrayCreation && !arrayCreation.getLevels().isEmpty()) {
-            var level = arrayCreation.getLevels().get(0);
-            if (level.getDimension().isPresent()) {
-                return sizeOrEvaluationCost(
-                        level.getDimension().get(), state, methodIndex, memo, visitStates, currentMethod);
-            }
+            ComplexityExpr magnitude = arrayAllocationMagnitude(
+                    arrayCreation, state, methodIndex, memo, visitStates, currentMethod);
+            state.addFinding("ALLOCATION", arrayCreation.getBegin().map(p -> p.line).orElse(null),
+                    arrayCreation.getEnd().map(p -> p.line).orElse(null),
+                    ComplexityExprSimplifier.toExpressionString(magnitude), "MEDIUM", "Array allocation");
+            return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(magnitude, ComplexityExpr.one())));
         }
         if (expression instanceof CastExpr cast) {
             return analyzeExpression(cast.getExpression(), state, methodIndex, memo, visitStates, currentMethod);
@@ -630,10 +638,9 @@ public class JavaStaticAnalyzer {
                     analyzeExpression(access.getIndex(), state, methodIndex, memo, visitStates, currentMethod))));
         }
         if (expression instanceof FieldAccessExpr access) {
-            if ("length".equals(access.getNameAsString())) {
-                return analyzeExpression(access.getScope(), state, methodIndex, memo, visitStates, currentMethod);
-            }
-            return analyzeExpression(access.getScope(), state, methodIndex, memo, visitStates, currentMethod);
+            ComplexityExpr scopeCost = analyzeExpression(
+                    access.getScope(), state, methodIndex, memo, visitStates, currentMethod);
+            return ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeCost, ComplexityExpr.one())));
         }
         return unsupportedExpression(expression, state);
     }
@@ -702,7 +709,11 @@ public class JavaStaticAnalyzer {
                     call.getEnd().map(p -> p.line).orElse(null),
                     ComplexityExprSimplifier.toExpressionString(entry.timeExpression()), "MEDIUM",
                     entry.note());
-            return entry.timeExpression();
+            ComplexityExpr jdkTime = entry.timeExpression();
+            if (!ComplexityExprSimplifier.allVariablesDocumented(jdkTime, state.documentedSymbolKeys())) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.UNDEFINED_SYMBOL);
+            }
+            return jdkTime;
         }
         String scopeLabel = call.getScope().map(Object::toString).orElse("unknown");
         state.markOpaque("Unresolved external call: " + scopeLabel + "." + methodName);
@@ -780,6 +791,7 @@ public class JavaStaticAnalyzer {
             if (statement instanceof ExpressionStmt exprStmt && exprStmt.getExpression() instanceof VariableDeclarationExpr varDecl) {
                 for (var variable : varDecl.getVariables()) {
                     if (variable.getInitializer().isPresent()) {
+                        registerLocalSizeAlias(variable.getNameAsString(), variable.getInitializer().get(), state);
                         ComplexityExpr alloc = allocationSize(
                                 variable.getInitializer().get(), state, methodIndex, memo, visitStates, currentMethod);
                         scopeLive = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeLive, alloc)));
@@ -856,10 +868,8 @@ public class JavaStaticAnalyzer {
             Map<String, ComplexityExpr> memo,
             Map<String, MethodVisitState> visitStates,
             String currentMethod) {
-        if (expression instanceof ArrayCreationExpr array && !array.getLevels().isEmpty()
-                && array.getLevels().get(0).getDimension().isPresent()) {
-            return sizeOrEvaluationCost(
-                    array.getLevels().get(0).getDimension().get(), state, methodIndex, memo, visitStates, currentMethod);
+        if (expression instanceof ArrayCreationExpr array && !array.getLevels().isEmpty()) {
+            return arrayAllocationMagnitude(array, state, methodIndex, memo, visitStates, currentMethod);
         }
         if (expression instanceof ObjectCreationExpr creation) {
             if (creation.getArguments().isEmpty()) {
@@ -883,6 +893,34 @@ public class JavaStaticAnalyzer {
             return allocationSize(assign.getValue(), state, methodIndex, memo, visitStates, currentMethod);
         }
         return ComplexityExpr.one();
+    }
+
+    private ComplexityExpr arrayAllocationMagnitude(
+            ArrayCreationExpr array,
+            AnalysisState state,
+            Map<String, MethodDeclaration> methodIndex,
+            Map<String, ComplexityExpr> memo,
+            Map<String, MethodVisitState> visitStates,
+            String currentMethod) {
+        List<ComplexityExpr> dimensions = new ArrayList<>();
+        for (var level : array.getLevels()) {
+            if (level.getDimension().isEmpty()) {
+                continue;
+            }
+            ComplexityExpr dim = sizeOrEvaluationCost(
+                    level.getDimension().get(), state, methodIndex, memo, visitStates, currentMethod);
+            if (dim instanceof ComplexityExpr.Unknown) {
+                return dim;
+            }
+            dimensions.add(dim);
+        }
+        if (dimensions.isEmpty()) {
+            return ComplexityExpr.one();
+        }
+        if (dimensions.size() == 1) {
+            return dimensions.getFirst();
+        }
+        return ComplexityExprSimplifier.simplify(new ComplexityExpr.Product(dimensions));
     }
 
     private enum MethodVisitState {
@@ -930,6 +968,8 @@ public class JavaStaticAnalyzer {
         final CompilationUnit compilationUnit;
         final Map<String, String> paramTypes;
         final Map<String, String> paramNameToSymbol;
+        final SymbolSizeResolver sizeResolver;
+        final List<ParameterShapeRegistry.ParameterShape> parameterShapes;
         final EnumSet<StaticAnalysisReasonCode> reasonCodes = EnumSet.noneOf(StaticAnalysisReasonCode.class);
         AnalysisDimensionCompleteness timeCompleteness = AnalysisDimensionCompleteness.COMPLETE;
         AnalysisDimensionCompleteness spaceCompleteness = AnalysisDimensionCompleteness.COMPLETE;
@@ -950,7 +990,13 @@ public class JavaStaticAnalyzer {
             this.variables = variables;
             this.compilationUnit = compilationUnit;
             this.paramTypes = buildDeclaredTypes(compilationUnit, entryMethod);
-            this.paramNameToSymbol = buildParamNameToSymbol(metadata, entryMethod);
+            this.parameterShapes = buildParameterShapes(metadata, entryMethod);
+            this.paramNameToSymbol = buildParamNameToSymbol(parameterShapes);
+            this.sizeResolver = new SymbolSizeResolver(parameterShapes);
+        }
+
+        Set<String> documentedSymbolKeys() {
+            return variables.keySet();
         }
 
         void addFinding(String category, Integer start, Integer end, String expression, String certainty, String summary) {
@@ -1009,32 +1055,21 @@ public class JavaStaticAnalyzer {
             return variables.containsKey("n") ? "n" : variables.keySet().stream().findFirst().orElse("n");
         }
 
-        String mapNameToVariable(String name) {
-            if (paramNameToSymbol.containsKey(name)) {
-                return paramNameToSymbol.get(name);
-            }
-            if (variables.containsKey(name)) {
-                return name;
-            }
-            return primarySizeVariable();
-        }
     }
 
-    private static Map<String, String> buildParamNameToSymbol(QuestionMetadataApiDto metadata, MethodDeclaration entryMethod) {
-        Map<String, String> mapping = new HashMap<>();
+    private static List<ParameterShapeRegistry.ParameterShape> buildParameterShapes(
+            QuestionMetadataApiDto metadata, MethodDeclaration entryMethod) {
         if (metadata != null && metadata.getParamNames() != null && metadata.getParamTypes() != null) {
-            List<String> names = metadata.getParamNames();
-            List<String> types = metadata.getParamTypes();
-            for (int i = 0; i < names.size() && i < types.size(); i++) {
-                mapping.put(names.get(i), ParameterVariableMapper.symbolForParameter(types.get(i), names.get(i), i));
-            }
-            return mapping;
+            return ParameterShapeRegistry.shapesFromMetadata(metadata.getParamNames(), metadata.getParamTypes());
         }
-        List<Parameter> parameters = entryMethod.getParameters();
-        for (int i = 0; i < parameters.size(); i++) {
-            Parameter parameter = parameters.get(i);
-            mapping.put(parameter.getNameAsString(),
-                    ParameterVariableMapper.symbolForParameter(parameter.getType().asString(), parameter.getNameAsString(), i));
+        return ParameterShapeRegistry.shapesFromParameters(entryMethod.getParameters());
+    }
+
+    private static Map<String, String> buildParamNameToSymbol(
+            List<ParameterShapeRegistry.ParameterShape> shapes) {
+        Map<String, String> mapping = new HashMap<>();
+        for (ParameterShapeRegistry.ParameterShape shape : shapes) {
+            mapping.put(shape.paramName(), shape.primarySymbol());
         }
         return mapping;
     }

@@ -75,13 +75,13 @@ public final class ComplexityExprSimplifier {
         return normalizeShape(expr);
     }
 
-    static String normalizeShape(ComplexityExpr expr) {
+    public static String normalizeShape(ComplexityExpr expr) {
         ComplexityExpr normalized = simplifyProductFactors(expr);
         return toExpressionString(normalized);
     }
 
     private static ComplexityExpr simplifyProduct(List<ComplexityExpr> factors) {
-        Map<String, Integer> variablePowers = new TreeMap<>(canonicalVariableComparator());
+        Map<String, Integer> variablePowers = new HashMap<>();
         int constant = 1;
         List<ComplexityExpr> nonVarFactors = new ArrayList<>();
 
@@ -112,13 +112,15 @@ public final class ComplexityExprSimplifier {
         if (constant != 1) {
             rebuilt.add(new ComplexityExpr.Constant(constant));
         }
-        for (Map.Entry<String, Integer> entry : variablePowers.entrySet()) {
-            if (entry.getValue() == 1) {
-                rebuilt.add(new ComplexityExpr.Variable(entry.getKey()));
-            } else {
-                rebuilt.add(new ComplexityExpr.Power(entry.getKey(), entry.getValue()));
-            }
-        }
+        variablePowers.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(displayOrderComparator()))
+                .forEach(entry -> {
+                    if (entry.getValue() == 1) {
+                        rebuilt.add(new ComplexityExpr.Variable(entry.getKey()));
+                    } else {
+                        rebuilt.add(new ComplexityExpr.Power(entry.getKey(), entry.getValue()));
+                    }
+                });
         rebuilt.addAll(nonVarFactors);
 
         if (rebuilt.isEmpty()) {
@@ -402,12 +404,40 @@ public final class ComplexityExprSimplifier {
         return best;
     }
 
-    private static Comparator<String> canonicalVariableComparator() {
-        return (a, b) -> Integer.compare(variableOrderIndex(a), variableOrderIndex(b));
+    /**
+     * Total order for display/canonical sorting only — never used for semantic equality.
+     */
+    public static Comparator<String> displayOrderComparator() {
+        return (a, b) -> {
+            if (a.equals(b)) {
+                return 0;
+            }
+            int order = Integer.compare(variableOrderIndex(a), variableOrderIndex(b));
+            if (order != 0) {
+                return order;
+            }
+            return a.compareTo(b);
+        };
+    }
+
+    public static java.util.Set<String> referencedVariableNames(ComplexityExpr expr) {
+        return variableNames(expr);
+    }
+
+    public static boolean allVariablesDocumented(ComplexityExpr expr, java.util.Set<String> documentedSymbols) {
+        for (String name : referencedVariableNames(expr)) {
+            if (!documentedSymbols.contains(name)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static int variableOrderIndex(String variable) {
         int idx = CANONICAL_VARIABLE_ORDER.indexOf(variable);
-        return idx >= 0 ? idx : CANONICAL_VARIABLE_ORDER.size() + variable.compareTo("z");
+        if (idx >= 0) {
+            return idx;
+        }
+        return CANONICAL_VARIABLE_ORDER.size() + 1000 + Math.abs(variable.hashCode() % 10000);
     }
 }
