@@ -3,16 +3,20 @@ package com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowle
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
 
+import java.util.EnumSet;
+
 public record JdkKnowledgeEntry(
-        String pattern,
-        String jdkBaseline,
+        JdkOperationIdentity operation,
         ComplexityBoundBasis boundBasis,
         ComplexityExpr timeExpression,
         ComplexityExpr allocationExpression,
-        String assumptions,
-        String note,
-        /**
-         * Required argument count at call site, or -1 when any count is safe for this entry.
-         */
-        int requiredArgumentCount) {
+        EnumSet<JdkTemplateVariable> requiredRoles,
+        boolean requiresComparatorProof,
+        boolean requiresHashKeyProof,
+        String note) {
+
+    /** Legacy display key for findings. */
+    public String pattern() {
+        return operation.qualifiedOwner() + "." + operation.methodName();
+    }
 }

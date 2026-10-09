@@ -41,6 +41,11 @@ class ComplexityAdversarialCorpus36MatrixTest {
     }
 
     @Test
+    void classifierTreatsImplicitLogProductAsMatching() {
+        assertEquals(true, matchesExpectedBigO("O(m log m)", "O(m*log(m))"));
+    }
+
+    @Test
     void corpusNeverCrashesAndPrintsMatrix() {
         System.out.println("CASE|AUDIT_EXPECTED|POST_TIME|POST_SPACE|POST_CONF|DISPOSITION|LATER_BATCH");
         int correct = 0, safe = 0, wrong = 0, crash = 0;
@@ -139,6 +144,9 @@ class ComplexityAdversarialCorpus36MatrixTest {
         boolean spaceOk = bigONormalized(postSpace).equals("O(n)") || matchesExpectedBigO("O(n)", postSpace);
         if (timeOk && spaceOk) {
             return "CORRECT_CONCRETE";
+        }
+        if (timeOk && "UNKNOWN".equals(postSpace)) {
+            return "SAFE_UNKNOWN";
         }
         if ("UNKNOWN".equals(postTime) && "UNKNOWN".equals(postSpace)) {
             return "SAFE_UNKNOWN";
@@ -265,7 +273,10 @@ class ComplexityAdversarialCorpus36MatrixTest {
         if (end < 0) {
             return null;
         }
-        return "O(" + s.substring(idx + 2, end).replace(" ", "") + ")";
+        String inner = s.substring(idx + 2, end);
+        inner = inner.replaceAll("([a-zA-Z_][a-zA-Z0-9_]*)\\s+log\\s*\\(", "$1*log(");
+        inner = inner.replaceAll("([a-zA-Z_][a-zA-Z0-9_]*)\\s+log\\s+([a-zA-Z_][a-zA-Z0-9_]*)", "$1*log($2)");
+        return "O(" + inner.replace(" ", "") + ")";
     }
 
     static boolean matchesExpectedBigO(String expected, String actual) {

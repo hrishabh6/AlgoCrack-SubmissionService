@@ -21,5 +21,18 @@ public enum StaticAnalysisReasonCode {
     RECURSION_PROGRESS_NOT_PROVEN,
     RECURSION_BASE_CASE_NOT_PROVEN,
     HELPER_SUMMARY_INCOMPLETE,
-    CALLSITE_SUBSTITUTION_FAILED
+    CALLSITE_SUBSTITUTION_FAILED,
+    JDK_TARGET_AMBIGUOUS,
+    JDK_OPERATION_UNSUPPORTED,
+    JDK_OVERLOAD_UNSUPPORTED,
+    JDK_CARDINALITY_UNRESOLVED,
+    JDK_CALLBACK_COST_UNRESOLVED,
+    JDK_CALLSITE_SUBSTITUTION_FAILED,
+    USER_TYPE_SHADOWS_JDK,
+    JDK_ALLOCATION_NOT_COMPOSED;
+
+    /** Space-only reasons must not invalidate an otherwise complete time dimension (Batch 3 closure). */
+    public boolean blocksTimeAuthoritativeness() {
+        return this != JDK_ALLOCATION_NOT_COMPOSED;
+    }
 }

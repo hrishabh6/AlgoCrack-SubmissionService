@@ -17,6 +17,8 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.context
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.context.SymbolSizeResolver;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExprSimplifier;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallSignatureInference;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallSiteBinder;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallTarget;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkCallTargetResolver;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.knowledge.JdkKnowledgeBase;
@@ -34,6 +36,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurre
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.RecurrenceSupport;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.recurrence.RecurrenceSupport.ArgumentPattern;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasis;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasisMerge;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisResult;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticFindingDraft;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
@@ -46,7 +49,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JavaStaticAnalyzer {
 
-    public static final String ANALYZER_VERSION = "static-v2.2-dev";
+    public static final String ANALYZER_VERSION = "static-v2.3-dev";
     public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.1-dev";
 
     private static final int MAX_HELPER_ANALYSIS_DEPTH = 128;
@@ -139,7 +142,7 @@ public class JavaStaticAnalyzer {
         ComplexityExpr diagnosticTimeOnly = null;
 
         if (state.timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE
-                || !state.reasonCodes.isEmpty()
+                || state.hasTimeBlockingReasonCodes()
                 || rawTime instanceof ComplexityExpr.Unknown) {
             if (!(authoritativeTime instanceof ComplexityExpr.Unknown)) {
                 diagnosticTimeOnly = authoritativeTime;
@@ -182,7 +185,7 @@ public class JavaStaticAnalyzer {
     }
 
     private static ComplexityResultKind classify(ComplexityExpr time, AnalysisState state) {
-        if (state.timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE || !state.reasonCodes.isEmpty()) {
+        if (state.timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE || state.hasTimeBlockingReasonCodes()) {
             return state.hasOpaqueDependency() ? ComplexityResultKind.INCONCLUSIVE : ComplexityResultKind.UNSUPPORTED;
         }
         if (time instanceof ComplexityExpr.Unknown) {
@@ -198,7 +201,7 @@ public class JavaStaticAnalyzer {
         if (expr instanceof ComplexityExpr.Unknown) {
             return null;
         }
-        if (state.timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE || !state.reasonCodes.isEmpty()) {
+        if (state.timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE || state.hasTimeBlockingReasonCodes()) {
             return ComplexityConfidence.LOW;
         }
         if (state.hasOpaqueDependency() || state.hasUnknownLoop()) {
@@ -571,6 +574,9 @@ public class JavaStaticAnalyzer {
                 state.registerLocalType(variable.getNameAsString(), varDecl.getElementType().asString());
                 if (variable.getInitializer().isPresent()) {
                     Expression init = variable.getInitializer().get();
+                    if (init instanceof ObjectCreationExpr creation) {
+                        state.registerLocalFromCreation(variable.getNameAsString(), creation);
+                    }
                     registerLocalSizeAlias(variable.getNameAsString(), init, state);
                     total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                             total,
@@ -673,28 +679,13 @@ public class JavaStaticAnalyzer {
             }
             return analyzeResolvedHelperCall(call, state, ipc, currentMethod, target, resolution.declaration(), 0);
         }
-        Optional<JdkCallTarget> staticTarget = JdkCallTargetResolver.resolve(call, state.compilationUnit);
-        int argCount = call.getArguments().size();
-        Optional<JdkKnowledgeEntry> jdk = staticTarget.flatMap(t -> knowledgeBase.matchQualified(t, methodName, argCount));
-        if (jdk.isEmpty()) {
-            jdk = JdkCallTargetResolver.resolveInstanceCall(call, state.paramTypes, state.compilationUnit)
-                    .flatMap(t -> knowledgeBase.matchQualified(t, methodName, argCount));
+        Optional<ComplexityExpr> jdkCost = tryAnalyzeJdkCall(call, state, methodName);
+        if (jdkCost.isPresent()) {
+            return jdkCost.get();
         }
-        if (jdk.isPresent()) {
-            JdkKnowledgeEntry entry = jdk.get();
-            state.noteBasis(entry.boundBasis());
-            if (entry.timeExpression() instanceof ComplexityExpr.Unknown) {
-                state.markOpaque("JDK operation partially modeled: " + entry.pattern());
-            }
-            state.addFinding("JDK_CALL", call.getBegin().map(p -> p.line).orElse(null),
-                    call.getEnd().map(p -> p.line).orElse(null),
-                    ComplexityExprSimplifier.toExpressionString(entry.timeExpression()), "MEDIUM",
-                    entry.note());
-            ComplexityExpr jdkTime = entry.timeExpression();
-            if (!ComplexityExprSimplifier.allVariablesDocumented(jdkTime, state.documentedSymbolKeys())) {
-                state.markTimeIncomplete(StaticAnalysisReasonCode.UNDEFINED_SYMBOL);
-            }
-            return jdkTime;
+        if (call.getScope().isPresent() && call.getScope().get() instanceof NameExpr nameExpr
+                && JdkCallTargetResolver.isSourceDefinedSimpleName(state.compilationUnit, nameExpr.getNameAsString())) {
+            state.markTimeIncomplete(StaticAnalysisReasonCode.USER_TYPE_SHADOWS_JDK);
         }
         String scopeLabel = call.getScope().map(Object::toString).orElse("unknown");
         state.markOpaque("Unresolved external call: " + scopeLabel + "." + methodName);
@@ -703,6 +694,100 @@ public class JavaStaticAnalyzer {
                 "Unresolved call " + scopeLabel + "." + methodName + " — not treated as O(1)");
         state.markTimeIncomplete(StaticAnalysisReasonCode.OPAQUE_CALL);
         return new ComplexityExpr.Unknown("opaque call");
+    }
+
+    private record JdkBoundCall(JdkKnowledgeEntry entry, ComplexityExpr time, ComplexityExpr allocation) {
+    }
+
+    private Optional<ComplexityExpr> tryAnalyzeJdkCall(
+            MethodCallExpr call,
+            AnalysisState state,
+            String methodName) {
+        Optional<JdkBoundCall> bound = tryBindJdkCall(call, state, methodName);
+        if (bound.isEmpty()) {
+            return Optional.empty();
+        }
+        JdkBoundCall jdk = bound.get();
+        if (!(jdk.time() instanceof ComplexityExpr.Unknown)) {
+            if (jdk.entry() != null && jdk.entry().requiresHashKeyProof() && !state.hashKeyCostProvenForCall(call)) {
+                state.markTimeIncomplete(StaticAnalysisReasonCode.JDK_CALLBACK_COST_UNRESOLVED);
+                return Optional.of(new ComplexityExpr.Unknown("jdk hash key cost unresolved"));
+            }
+            noteJdkAllocationSpacePolicy(jdk.allocation(), state);
+            if (jdk.entry() != null) {
+                state.noteBasis(jdk.entry().boundBasis());
+                state.addFinding("JDK_CALL", call.getBegin().map(p -> p.line).orElse(null),
+                        call.getEnd().map(p -> p.line).orElse(null),
+                        ComplexityExprSimplifier.toExpressionString(jdk.time()), "MEDIUM",
+                        jdk.entry().note());
+            }
+        }
+        return Optional.of(jdk.time());
+    }
+
+    private Optional<JdkBoundCall> tryBindJdkCall(
+            MethodCallExpr call,
+            AnalysisState state,
+            String methodName) {
+        Optional<JdkCallTarget> target = JdkCallTargetResolver.resolveStaticCall(call, state.compilationUnit);
+        if (target.isEmpty()) {
+            target = JdkCallTargetResolver.resolveInstanceCall(
+                    call,
+                    state.paramTypes,
+                    state.localNameToType,
+                    state.localJdkConcreteTypes,
+                    state.compilationUnit);
+        }
+        if (target.isEmpty()) {
+            return Optional.empty();
+        }
+        JdkCallTarget resolvedTarget = target.get();
+        List<String> inferredParams = JdkCallSignatureInference.inferParameterTypes(
+                call, state.localNameToRawType, state.paramTypes, state.localJdkConcreteTypes);
+        Optional<JdkKnowledgeEntry> entry = knowledgeBase.matchOperation(resolvedTarget, methodName, inferredParams);
+        if (entry.isEmpty()) {
+            state.markTimeIncomplete(inferredParams.stream().anyMatch("unknown"::equals)
+                    ? StaticAnalysisReasonCode.JDK_OVERLOAD_UNSUPPORTED
+                    : StaticAnalysisReasonCode.JDK_OPERATION_UNSUPPORTED);
+            state.markOpaque("Unsupported JDK operation: " + resolvedTarget.qualifiedType() + "." + methodName);
+            return Optional.of(new JdkBoundCall(null,
+                    new ComplexityExpr.Unknown("unsupported jdk operation"), ComplexityExpr.one()));
+        }
+        JdkKnowledgeEntry jdkEntry = entry.get();
+        if (jdkEntry.requiresComparatorProof() && !state.comparatorCostProvenForCall(call)) {
+            state.markTimeIncomplete(StaticAnalysisReasonCode.JDK_CALLBACK_COST_UNRESOLVED);
+            return Optional.of(new JdkBoundCall(jdkEntry,
+                    new ComplexityExpr.Unknown("jdk comparator cost unresolved"), ComplexityExpr.one()));
+        }
+        JdkCallSiteBinder.BindResult bound = JdkCallSiteBinder.bind(
+                jdkEntry,
+                call,
+                resolvedTarget,
+                expr -> mapSizeExpression(expr, state),
+                expr -> state.resolveJdkReceiverCardinality(expr),
+                state.documentedSymbolKeys());
+        if (!bound.success()) {
+            StaticAnalysisReasonCode code = switch (bound.failureKind()) {
+                case CARDINALITY_UNRESOLVED -> StaticAnalysisReasonCode.JDK_CARDINALITY_UNRESOLVED;
+                case CALLBACK_UNRESOLVED -> StaticAnalysisReasonCode.JDK_CALLBACK_COST_UNRESOLVED;
+                default -> StaticAnalysisReasonCode.JDK_CALLSITE_SUBSTITUTION_FAILED;
+            };
+            state.markTimeIncomplete(code);
+            return Optional.of(new JdkBoundCall(jdkEntry,
+                    new ComplexityExpr.Unknown("jdk call-site bind failed"), ComplexityExpr.one()));
+        }
+        return Optional.of(new JdkBoundCall(jdkEntry, bound.time(), bound.allocation()));
+    }
+
+    private static void noteJdkAllocationSpacePolicy(ComplexityExpr allocation, AnalysisState state) {
+        if (isNonTrivialJdkAllocation(allocation)) {
+            state.markSpaceIncomplete(StaticAnalysisReasonCode.JDK_ALLOCATION_NOT_COMPOSED);
+        }
+    }
+
+    private static boolean isNonTrivialJdkAllocation(ComplexityExpr allocation) {
+        ComplexityExpr simplified = ComplexityExprSimplifier.simplify(allocation);
+        return !(simplified instanceof ComplexityExpr.Constant constant && constant.value() == 1);
     }
 
     private ComplexityExpr analyzeDirectSelfRecurrence(
@@ -943,6 +1028,13 @@ public class JavaStaticAnalyzer {
         if (expression instanceof AssignExpr assign) {
             return allocationSize(assign.getValue(), state, ipc, currentMethod);
         }
+        if (expression instanceof MethodCallExpr call) {
+            Optional<JdkBoundCall> jdk = tryBindJdkCall(call, state, call.getNameAsString());
+            if (jdk.isPresent()) {
+                noteJdkAllocationSpacePolicy(jdk.get().allocation(), state);
+                return ComplexityExpr.one();
+            }
+        }
         return ComplexityExpr.one();
     }
 
@@ -1014,6 +1106,8 @@ public class JavaStaticAnalyzer {
         final List<ParameterShapeRegistry.ParameterShape> parameterShapes;
         final EnumSet<StaticAnalysisReasonCode> reasonCodes = EnumSet.noneOf(StaticAnalysisReasonCode.class);
         final Map<String, String> localNameToType = new HashMap<>();
+        final Map<String, String> localNameToRawType = new HashMap<>();
+        final Map<String, String> localJdkConcreteTypes = new HashMap<>();
         String declaringTypeName = "Solution";
         AnalysisDimensionCompleteness timeCompleteness = AnalysisDimensionCompleteness.COMPLETE;
         AnalysisDimensionCompleteness spaceCompleteness = AnalysisDimensionCompleteness.COMPLETE;
@@ -1047,7 +1141,149 @@ public class JavaStaticAnalyzer {
             if (localName == null || localName.isBlank() || rawType == null) {
                 return;
             }
+            localNameToRawType.put(localName, rawType.trim());
             localNameToType.put(localName, MethodIdentity.eraseType(rawType));
+            resolveConcreteJdkType(rawType.trim()).ifPresent(fqn -> localJdkConcreteTypes.put(localName, fqn));
+        }
+
+        void registerLocalFromCreation(String localName, ObjectCreationExpr creation) {
+            String raw = creation.getType().asString();
+            registerLocalType(localName, raw);
+        }
+
+        boolean hashKeyCostProvenForCall(MethodCallExpr call) {
+            if (call.getArguments().isEmpty()) {
+                return true;
+            }
+            Expression keyArg = call.getArgument(0);
+            return isProvenSafeHashKeyExpression(keyArg);
+        }
+
+        private boolean isProvenSafeHashKeyExpression(Expression expression) {
+            if (expression instanceof IntegerLiteralExpr || expression instanceof StringLiteralExpr) {
+                return true;
+            }
+            if (expression instanceof NameExpr name) {
+                String raw = localNameToRawType.getOrDefault(name.getNameAsString(),
+                        paramTypes.get(name.getNameAsString()));
+                if (raw == null) {
+                    return false;
+                }
+                String simple = raw.contains(".") ? raw.substring(raw.lastIndexOf('.') + 1) : raw;
+                if (JdkCallTargetResolver.isSourceDefinedSimpleName(compilationUnit, simple)) {
+                    return false;
+                }
+                return isProvenSafeHashKeyType(raw);
+            }
+            Optional<String> inferred = JdkCallSignatureInference.inferExpressionType(
+                    expression, localNameToRawType, paramTypes, localJdkConcreteTypes);
+            if (inferred.isEmpty()) {
+                return false;
+            }
+            String type = inferred.get();
+            if (JdkCallTargetResolver.isSourceDefinedSimpleName(compilationUnit, type)) {
+                return false;
+            }
+            return isProvenSafeHashKeyType(type);
+        }
+
+        private static boolean isProvenSafeHashKeyType(String rawType) {
+            String base = rawType;
+            int generic = rawType.indexOf('<');
+            if (generic >= 0) {
+                base = rawType.substring(0, generic).trim();
+            }
+            if (base.endsWith("[]")) {
+                return false;
+            }
+            return switch (base) {
+                case "int", "Integer", "long", "Long", "short", "Short", "byte", "Byte", "char", "Character",
+                        "String", "boolean", "Boolean", "double", "Double", "float", "Float" -> true;
+                default -> base.startsWith("java.lang.")
+                        && !"java.lang.Object".equals(base);
+            };
+        }
+
+        boolean comparatorCostProvenForCall(MethodCallExpr call) {
+            if (call.getScope().isEmpty() || !(call.getScope().get() instanceof NameExpr name)) {
+                return false;
+            }
+            String raw = localNameToRawType.getOrDefault(name.getNameAsString(),
+                    paramTypes.get(name.getNameAsString()));
+            if (raw == null) {
+                return false;
+            }
+            return hasProvenComparableElement(raw);
+        }
+
+        private static boolean hasProvenComparableElement(String rawType) {
+            int genericStart = rawType.indexOf('<');
+            if (genericStart < 0) {
+                return true;
+            }
+            int genericEnd = rawType.lastIndexOf('>');
+            if (genericEnd <= genericStart) {
+                return false;
+            }
+            String typeArg = rawType.substring(genericStart + 1, genericEnd).trim();
+            if (typeArg.contains(",")) {
+                return false;
+            }
+            return switch (typeArg) {
+                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "String", "int", "long",
+                        "double", "float", "short", "byte", "char" -> true;
+                default -> false;
+            };
+        }
+
+        Optional<ComplexityExpr> resolveJdkReceiverCardinality(Expression expression) {
+            if (expression instanceof NameExpr name) {
+                String param = name.getNameAsString();
+                for (ParameterShapeRegistry.ParameterShape shape : parameterShapes) {
+                    if (shape.paramName().equals(param)
+                            && shape.kind() == ParameterShapeRegistry.ParameterShape.Kind.COLLECTION) {
+                        return sizeResolver.resolveSize(expression);
+                    }
+                }
+                if (localJdkConcreteTypes.containsKey(param)) {
+                    return Optional.empty();
+                }
+                if (paramTypes.containsKey(param) && isConcreteJdkTypeName(paramTypes.get(param))) {
+                    return Optional.empty();
+                }
+            }
+            return Optional.empty();
+        }
+
+        private static boolean isConcreteJdkTypeName(String type) {
+            if (type == null) {
+                return false;
+            }
+            String lower = type.toLowerCase(Locale.ROOT);
+            return lower.contains("priorityqueue") || lower.contains("arraylist") || lower.contains("treemap")
+                    || lower.contains("hashmap") || lower.contains("arraydeque") || lower.contains("linkedlist");
+        }
+
+        private Optional<String> resolveConcreteJdkType(String rawType) {
+            String base = rawType;
+            if (base.contains("<")) {
+                base = base.substring(0, base.indexOf('<'));
+            }
+            if (base.contains(".")) {
+                return base.startsWith("java.") ? Optional.of(base) : Optional.empty();
+            }
+            return switch (base) {
+                case "PriorityQueue" -> Optional.of("java.util.PriorityQueue");
+                case "ArrayList" -> Optional.of("java.util.ArrayList");
+                case "LinkedList" -> Optional.of("java.util.LinkedList");
+                case "ArrayDeque" -> Optional.of("java.util.ArrayDeque");
+                case "HashMap" -> Optional.of("java.util.HashMap");
+                case "HashSet" -> Optional.of("java.util.HashSet");
+                case "TreeMap" -> Optional.of("java.util.TreeMap");
+                case "TreeSet" -> Optional.of("java.util.TreeSet");
+                case "StringBuilder" -> Optional.of("java.lang.StringBuilder");
+                default -> Optional.empty();
+            };
         }
 
         AnalysisState forkForRecurrenceSiblingPass() {
@@ -1061,19 +1297,25 @@ public class JavaStaticAnalyzer {
                     paramTypes);
             fork.declaringTypeName = declaringTypeName;
             fork.localNameToType.putAll(localNameToType);
+            fork.localNameToRawType.putAll(localNameToRawType);
+            fork.localJdkConcreteTypes.putAll(localJdkConcreteTypes);
             return fork;
         }
 
         boolean hasRecurrenceSiblingIncompleteness() {
             return timeCompleteness == AnalysisDimensionCompleteness.INCOMPLETE
-                    || !reasonCodes.isEmpty()
+                    || hasTimeBlockingReasonCodes()
                     || hasOpaqueDependency()
                     || hasUnknownLoop();
         }
 
         void absorbRecurrenceSiblingIncompleteness(AnalysisState sibling) {
             for (StaticAnalysisReasonCode code : sibling.reasonCodes) {
-                markTimeIncomplete(code);
+                if (code.blocksTimeAuthoritativeness()) {
+                    markTimeIncomplete(code);
+                } else {
+                    markSpaceIncomplete(code);
+                }
             }
             if (sibling.hasOpaqueDependency()) {
                 markOpaque("Recurrence sibling work incomplete");
@@ -1155,9 +1397,11 @@ public class JavaStaticAnalyzer {
         }
 
         void noteBasis(ComplexityBoundBasis basis) {
-            if (basis == ComplexityBoundBasis.EXPECTED_ASSUMPTION || basis == ComplexityBoundBasis.AMORTIZED_ASSUMPTION) {
-                worstBasis = basis;
-            }
+            worstBasis = ComplexityBoundBasisMerge.merge(worstBasis, basis);
+        }
+
+        boolean hasTimeBlockingReasonCodes() {
+            return reasonCodes.stream().anyMatch(StaticAnalysisReasonCode::blocksTimeAuthoritativeness);
         }
 
         boolean hasOpaqueDependency() {
