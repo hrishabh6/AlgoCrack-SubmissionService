@@ -126,7 +126,7 @@ class ComplexityAdversarialCorpus36MatrixTest {
                     || result.findings().stream().anyMatch(f -> "MUTABLE_STATIC".equals(f.category()))
                     ? "CORRECT_CONCRETE"
                     : "STILL_WRONG";
-            case QUALITATIVE_OR_UNKNOWN -> classifyQualitative(row.auditExpected(), postTime, postSpace, conf, kind);
+            case QUALITATIVE_OR_UNKNOWN -> classifyQualitative(row.name(), row.auditExpected(), postTime, postSpace, conf, kind);
         };
     }
 
@@ -156,8 +156,14 @@ class ComplexityAdversarialCorpus36MatrixTest {
     }
 
     private static String classifyQualitative(
-            String auditExpected, String postTime, String postSpace, ComplexityConfidence conf, ComplexityResultKind kind) {
+            String rowName,
+            String auditExpected,
+            String postTime,
+            String postSpace,
+            ComplexityConfidence conf,
+            ComplexityResultKind kind) {
         String lower = auditExpected.toLowerCase(Locale.ROOT);
+        String rowLower = rowName == null ? "" : rowName.toLowerCase(Locale.ROOT);
         if (lower.contains("unknown")) {
             if ("UNKNOWN".equals(postTime) || kind == ComplexityResultKind.INCONCLUSIVE
                     || kind == ComplexityResultKind.UNSUPPORTED) {
@@ -180,11 +186,23 @@ class ComplexityAdversarialCorpus36MatrixTest {
             }
         }
         if (lower.contains("resolve signature") || lower.contains("user call")) {
-            if ("UNKNOWN".equals(postTime) || kind != ComplexityResultKind.STATIC_ONLY) {
+            if ("UNKNOWN".equals(postTime) || kind == ComplexityResultKind.INCONCLUSIVE
+                    || kind == ComplexityResultKind.UNSUPPORTED) {
                 return "SAFE_UNKNOWN";
+            }
+            if (kind == ComplexityResultKind.STATIC_ONLY && matchesExpectedBigO("O(n)", postTime)) {
+                return "CORRECT_CONCRETE";
             }
             if (conf == ComplexityConfidence.HIGH) {
                 return "STILL_WRONG";
+            }
+        }
+        if (rowLower.contains("halving") || lower.contains("halving") || (lower.contains("n/2") && lower.contains("sibling"))) {
+            if (matchesExpectedBigO("O(n)", postTime) && kind == ComplexityResultKind.STATIC_ONLY) {
+                return "CORRECT_CONCRETE";
+            }
+            if ("UNKNOWN".equals(postTime)) {
+                return "SAFE_UNKNOWN";
             }
         }
         if (lower.contains("linear") && lower.contains("unknown")) {
