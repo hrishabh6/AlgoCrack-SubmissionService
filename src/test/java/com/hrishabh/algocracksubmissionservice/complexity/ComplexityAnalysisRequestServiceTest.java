@@ -15,7 +15,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.Optional;
@@ -34,9 +33,6 @@ class ComplexityAnalysisRequestServiceTest {
     private ComplexityAnalysisRepository complexityAnalysisRepository;
 
     @Mock
-    private ApplicationEventPublisher eventPublisher;
-
-    @Mock
     private com.hrishabh.algocracksubmissionservice.complexity.metrics.ComplexityMetrics complexityMetrics;
 
     private ComplexityAnalysisRequestService requestService;
@@ -50,7 +46,6 @@ class ComplexityAnalysisRequestServiceTest {
                 accessService,
                 complexityAnalysisRepository,
                 new ComplexityAnalysisMapper(properties, new ComplexityAnalysisJsonSupport(new com.fasterxml.jackson.databind.ObjectMapper())),
-                eventPublisher,
                 complexityMetrics);
     }
 

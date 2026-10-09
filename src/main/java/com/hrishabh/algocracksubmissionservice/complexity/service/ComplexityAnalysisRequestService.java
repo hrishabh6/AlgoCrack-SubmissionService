@@ -9,7 +9,6 @@ import com.hrishabh.algocracksubmissionservice.complexity.support.ComplexityLang
 import com.hrishabh.algocracksubmissionservice.complexity.support.SourceSha256Hasher;
 import com.hrishabh.algocracksubmissionservice.models.Submission;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +22,6 @@ public class ComplexityAnalysisRequestService {
     private final ComplexitySubmissionAccessService submissionAccessService;
     private final ComplexityAnalysisRepository complexityAnalysisRepository;
     private final ComplexityAnalysisMapper mapper;
-    private final ApplicationEventPublisher eventPublisher;
     private final ComplexityMetrics complexityMetrics;
 
     @Transactional
@@ -39,7 +37,11 @@ public class ComplexityAnalysisRequestService {
 
         try {
             ComplexityAnalysis created = complexityAnalysisRepository.save(buildQueuedAnalysis(submission));
-            eventPublisher.publishEvent(new ComplexityAnalysisAsyncTrigger.ComplexityAnalysisRequestedEvent(created.getAnalysisId()));
+            // The database-backed worker owns pipeline execution.  Running the
+            // pipeline from an AFTER_COMMIT listener races that worker against
+            // the just-created row, which can leave a completed analysis without
+            // its static-analysis result.  Returning QUEUED here is intentional:
+            // the worker picks it up on its next bounded poll.
             complexityMetrics.recordAnalysisRequest(false);
             return mapper.toRequestResponse(created, false);
         } catch (DataIntegrityViolationException ex) {
