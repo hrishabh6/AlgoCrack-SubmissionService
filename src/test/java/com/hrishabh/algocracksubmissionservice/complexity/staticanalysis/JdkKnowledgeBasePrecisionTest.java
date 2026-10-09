@@ -35,7 +35,7 @@ class JdkKnowledgeBasePrecisionTest {
     }
 
     @Test
-    void arraysSortRangeOverloadIsOpaque() {
+    void arraysSortRangeOverloadIsModeledWithRangeLength() {
         StaticAnalysisResult result = analyzer.analyze("""
                 import java.util.Arrays;
                 class Solution {
@@ -44,7 +44,18 @@ class JdkKnowledgeBasePrecisionTest {
                   }
                 }
                 """, metadata("nums", "int[]"));
-        assertTrue(result.findings().stream().anyMatch(f -> "OPAQUE_CALL".equals(f.category())));
+        assertTrue(result.findings().stream().anyMatch(f -> "JDK_CALL".equals(f.category())));
+        assertTrue(ComplexityExprSimplifier.toBigOString(result.timeExpression()).contains("log"));
+    }
+
+    @Test
+    void userDefinedArraysDoesNotReceiveJdkSortSemantics() {
+        StaticAnalysisResult result = analyzer.analyze("""
+                class Arrays { static void sort(int[] x) {} }
+                class Solution { public int solve(int[] a) { Arrays.sort(a); return 0; } }
+                """, metadata("a", "int[]"));
+        assertFalse(result.findings().stream().anyMatch(f -> "JDK_CALL".equals(f.category())));
+        assertEquals("UNKNOWN", ComplexityExprSimplifier.toBigOString(result.timeExpression()));
     }
 
     @Test
