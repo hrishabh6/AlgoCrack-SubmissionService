@@ -12,6 +12,7 @@ public record JdkKnowledgeEntry(
         ComplexityExpr allocationExpression,
         EnumSet<JdkTemplateVariable> requiredRoles,
         boolean requiresComparatorProof,
+        boolean requiresHashKeyProof,
         String note) {
 
     /** Legacy display key for findings. */

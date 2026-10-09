@@ -121,6 +121,7 @@ public class JdkKnowledgeBase {
             ComplexityExpr alloc,
             EnumSet<JdkTemplateVariable> roles,
             boolean comparatorProof,
+            boolean hashKeyProof,
             String note) {
         return new JdkKnowledgeEntry(
                 new JdkOperationIdentity(owner, method, staticMethod, params),
@@ -129,6 +130,7 @@ public class JdkKnowledgeBase {
                 alloc,
                 roles,
                 comparatorProof,
+                hashKeyProof,
                 note);
     }
 }

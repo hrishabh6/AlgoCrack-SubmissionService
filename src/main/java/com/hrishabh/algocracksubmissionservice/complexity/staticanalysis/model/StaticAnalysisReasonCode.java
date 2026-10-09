@@ -28,5 +28,11 @@ public enum StaticAnalysisReasonCode {
     JDK_CARDINALITY_UNRESOLVED,
     JDK_CALLBACK_COST_UNRESOLVED,
     JDK_CALLSITE_SUBSTITUTION_FAILED,
-    USER_TYPE_SHADOWS_JDK
+    USER_TYPE_SHADOWS_JDK,
+    JDK_ALLOCATION_NOT_COMPOSED;
+
+    /** Space-only reasons must not invalidate an otherwise complete time dimension (Batch 3 closure). */
+    public boolean blocksTimeAuthoritativeness() {
+        return this != JDK_ALLOCATION_NOT_COMPOSED;
+    }
 }
