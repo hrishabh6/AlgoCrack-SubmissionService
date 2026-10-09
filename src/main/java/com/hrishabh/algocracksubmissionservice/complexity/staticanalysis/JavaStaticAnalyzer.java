@@ -39,6 +39,9 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.C
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.ComplexityBoundBasisMerge;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticAnalysisResult;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.model.StaticFindingDraft;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.CollectionGrowthSpaceSupport;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.MethodSpaceSummary;
+import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.ReturnAllocationSupport;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -49,8 +52,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JavaStaticAnalyzer {
 
-    public static final String ANALYZER_VERSION = "static-v2.3-dev";
-    public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.1-dev";
+    public static final String ANALYZER_VERSION = "static-v2.4-batch4-space";
+    public static final String CONFIDENCE_MODEL_VERSION = "static-confidence-v2.2-batch4-space";
 
     private static final int MAX_HELPER_ANALYSIS_DEPTH = 128;
 
@@ -298,14 +301,32 @@ public class JavaStaticAnalyzer {
                 continue;
             }
             for (VariableDeclarator variable : field.getVariables()) {
-                if (variable.getInitializer().isEmpty()) {
+                if (isMutableStaticField(field, variable)) {
                     state.addFinding("MUTABLE_STATIC", field.getBegin().map(p -> p.line).orElse(null),
                             field.getEnd().map(p -> p.line).orElse(null), null, "HIGH",
-                            "Mutable or uninitialized static field " + variable.getNameAsString());
-                    state.limitations.add("MUTABLE_STATIC_STATE");
+                            "Mutable static field " + variable.getNameAsString());
+                    state.markSpaceIncomplete(StaticAnalysisReasonCode.MUTABLE_STATIC_STATE);
                 }
             }
         }
+    }
+
+    private static boolean isMutableStaticField(FieldDeclaration field, VariableDeclarator variable) {
+        if (variable.getInitializer().isEmpty() && !field.isFinal()) {
+            return true;
+        }
+        if (variable.getInitializer().isEmpty()) {
+            return false;
+        }
+        String erased = MethodIdentity.eraseType(field.getElementType().asString());
+        if ("int".equals(erased) || "long".equals(erased) || "boolean".equals(erased) || "double".equals(erased)
+                || "float".equals(erased) || "char".equals(erased) || "byte".equals(erased) || "short".equals(erased)) {
+            return !field.isFinal();
+        }
+        if ("String".equals(erased) && field.isFinal()) {
+            return false;
+        }
+        return true;
     }
 
 
@@ -713,7 +734,6 @@ public class JavaStaticAnalyzer {
                 state.markTimeIncomplete(StaticAnalysisReasonCode.JDK_CALLBACK_COST_UNRESOLVED);
                 return Optional.of(new ComplexityExpr.Unknown("jdk hash key cost unresolved"));
             }
-            noteJdkAllocationSpacePolicy(jdk.allocation(), state);
             if (jdk.entry() != null) {
                 state.noteBasis(jdk.entry().boundBasis());
                 state.addFinding("JDK_CALL", call.getBegin().map(p -> p.line).orElse(null),
@@ -777,12 +797,6 @@ public class JavaStaticAnalyzer {
                     new ComplexityExpr.Unknown("jdk call-site bind failed"), ComplexityExpr.one()));
         }
         return Optional.of(new JdkBoundCall(jdkEntry, bound.time(), bound.allocation()));
-    }
-
-    private static void noteJdkAllocationSpacePolicy(ComplexityExpr allocation, AnalysisState state) {
-        if (isNonTrivialJdkAllocation(allocation)) {
-            state.markSpaceIncomplete(StaticAnalysisReasonCode.JDK_ALLOCATION_NOT_COMPOSED);
-        }
     }
 
     private static boolean isNonTrivialJdkAllocation(ComplexityExpr allocation) {
@@ -905,7 +919,7 @@ public class JavaStaticAnalyzer {
             InterproceduralContext ipc,
             MethodIdentity entryIdentity) {
         ComplexityExpr allocationPeak = analyzeBlockSpacePeak(
-                entryMethod.getBody().orElse(new BlockStmt()), state, ipc, entryIdentity, false);
+                entryMethod.getBody().orElse(new BlockStmt()), state, ipc, entryIdentity, entryIdentity, false);
 
         MethodCallGraph.RecursionKind kind = ipc.callGraph.classify(entryIdentity);
         ArgumentPattern stackPattern = ArgumentPattern.UNSUPPORTED;
@@ -925,24 +939,31 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeBlockSpacePeak(
             BlockStmt block,
             AnalysisState state,
-            InterproceduralContext ipc, MethodIdentity currentMethod,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity,
             boolean disjointNestedScope) {
         ComplexityExpr scopeLive = ComplexityExpr.one();
         ComplexityExpr nestedDisjointPeak = ComplexityExpr.one();
         for (Statement statement : block.getStatements()) {
             if (statement instanceof ExpressionStmt exprStmt && exprStmt.getExpression() instanceof VariableDeclarationExpr varDecl) {
                 for (var variable : varDecl.getVariables()) {
+                    state.registerLocalType(variable.getNameAsString(), varDecl.getElementType().asString());
                     if (variable.getInitializer().isPresent()) {
-                        registerLocalSizeAlias(variable.getNameAsString(), variable.getInitializer().get(), state);
+                        Expression init = variable.getInitializer().get();
+                        if (init instanceof ObjectCreationExpr creation) {
+                            state.registerLocalFromCreation(variable.getNameAsString(), creation);
+                        }
+                        registerLocalSizeAlias(variable.getNameAsString(), init, state);
                         ComplexityExpr alloc = allocationSize(
-                                variable.getInitializer().get(), state, ipc, currentMethod);
+                                init, state, ipc, currentMethod, entryIdentity, false);
                         scopeLive = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(scopeLive, alloc)));
                     }
                 }
                 continue;
             }
             ComplexityExpr stmtPeak = analyzeStatementSpacePeak(
-                    statement, state, ipc, currentMethod, disjointNestedScope);
+                    statement, state, ipc, currentMethod, entryIdentity, disjointNestedScope);
             nestedDisjointPeak = ComplexityExprSimplifier.branchWorstCase(nestedDisjointPeak, stmtPeak);
         }
         if (disjointNestedScope) {
@@ -954,42 +975,55 @@ public class JavaStaticAnalyzer {
     private ComplexityExpr analyzeStatementSpacePeak(
             Statement statement,
             AnalysisState state,
-            InterproceduralContext ipc, MethodIdentity currentMethod,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity,
             boolean parentScope) {
         return switch (statement) {
-            case BlockStmt block -> analyzeBlockSpacePeak(block, state, ipc, currentMethod, true);
+            case BlockStmt block -> analyzeBlockSpacePeak(block, state, ipc, currentMethod, entryIdentity, true);
             case ForStmt forStmt -> {
+                ConservativeLoopBoundProof.BoundMapper mapper = boundMapper(state);
+                ConservativeLoopBoundProof.ProofResult proof = ConservativeLoopBoundProof.proveForLoop(forStmt, mapper);
                 ComplexityExpr body = forStmt.getBody() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
-                        : analyzeStatementSpacePeak(forStmt.getBody(), state, ipc, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, entryIdentity, true)
+                        : analyzeStatementSpacePeak(forStmt.getBody(), state, ipc, currentMethod, entryIdentity, parentScope);
+                if (proof.failure().isPresent()) {
+                    yield body;
+                }
+                ComplexityExpr bound = proof.iterationBound().orElse(ComplexityExpr.one());
+                Optional<ComplexityExpr> retained = CollectionGrowthSpaceSupport.retainedGrowthFromProvenForLoop(
+                        forStmt, bound, state.localNameToRawType);
+                if (retained.isPresent()) {
+                    yield ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(body, retained.get())));
+                }
                 yield body;
             }
             case ForEachStmt forEach -> {
                 ComplexityExpr body = forEach.getBody() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
-                        : analyzeStatementSpacePeak(forEach.getBody(), state, ipc, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, entryIdentity, true)
+                        : analyzeStatementSpacePeak(forEach.getBody(), state, ipc, currentMethod, entryIdentity, parentScope);
                 yield body;
             }
             case WhileStmt whileStmt -> {
                 ComplexityExpr body = whileStmt.getBody() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
-                        : analyzeStatementSpacePeak(whileStmt.getBody(), state, ipc, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, entryIdentity, true)
+                        : analyzeStatementSpacePeak(whileStmt.getBody(), state, ipc, currentMethod, entryIdentity, parentScope);
                 yield body;
             }
             case ReturnStmt returnStmt -> returnStmt.getExpression()
-                    .map(expr -> allocationSize(expr, state, ipc, currentMethod))
+                    .map(expr -> spacePeakForReturnExpression(expr, state, ipc, currentMethod, entryIdentity))
                     .orElse(ComplexityExpr.one());
             case ExpressionStmt expressionStmt -> expressionStmt.getExpression() == null
                     ? ComplexityExpr.one()
-                    : allocationSize(expressionStmt.getExpression(), state, ipc, currentMethod);
+                    : allocationSize(expressionStmt.getExpression(), state, ipc, currentMethod, entryIdentity, false);
             case IfStmt ifStmt -> {
                 ComplexityExpr thenPeak = ifStmt.getThenStmt() instanceof BlockStmt b
-                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
-                        : analyzeStatementSpacePeak(ifStmt.getThenStmt(), state, ipc, currentMethod, parentScope);
+                        ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, entryIdentity, true)
+                        : analyzeStatementSpacePeak(ifStmt.getThenStmt(), state, ipc, currentMethod, entryIdentity, parentScope);
                 ComplexityExpr elsePeak = ifStmt.getElseStmt()
                         .map(s -> s instanceof BlockStmt b
-                                ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, true)
-                                : analyzeStatementSpacePeak(s, state, ipc, currentMethod, parentScope))
+                                ? analyzeBlockSpacePeak(b, state, ipc, currentMethod, entryIdentity, true)
+                                : analyzeStatementSpacePeak(s, state, ipc, currentMethod, entryIdentity, parentScope))
                         .orElse(ComplexityExpr.one());
                 yield ComplexityExprSimplifier.branchWorstCase(thenPeak, elsePeak);
             }
@@ -1000,10 +1034,37 @@ public class JavaStaticAnalyzer {
         };
     }
 
+    private ComplexityExpr spacePeakForReturnExpression(
+            Expression expression,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity) {
+        if (!currentMethod.equals(entryIdentity)) {
+            return ComplexityExpr.one();
+        }
+        if (ReturnAllocationSupport.isPassThroughHelperReturn(expression)) {
+            return allocationSize(expression, state, ipc, currentMethod, entryIdentity, true);
+        }
+        if (ReturnAllocationSupport.isDefiniteRequiredOutputExpression(expression)) {
+            return ComplexityExpr.one();
+        }
+        ComplexityExpr returnedMagnitude = rawAllocationMagnitude(
+                expression, state, ipc, currentMethod, entryIdentity);
+        if (returnedMagnitude instanceof ComplexityExpr.Constant constant && constant.value() == 1) {
+            return ComplexityExpr.one();
+        }
+        state.markSpaceIncomplete(StaticAnalysisReasonCode.OUTPUT_OWNERSHIP_UNRESOLVED);
+        return allocationSize(expression, state, ipc, currentMethod, entryIdentity, false);
+    }
+
     private ComplexityExpr allocationSize(
             Expression expression,
             AnalysisState state,
-            InterproceduralContext ipc, MethodIdentity currentMethod) {
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity,
+            boolean passThroughReturn) {
         if (expression instanceof ArrayCreationExpr array && !array.getLevels().isEmpty()) {
             return arrayAllocationMagnitude(array, state, ipc, currentMethod);
         }
@@ -1020,20 +1081,150 @@ public class JavaStaticAnalyzer {
                 if (variable.getInitializer().isPresent()) {
                     total = ComplexityExprSimplifier.simplify(new ComplexityExpr.Sum(List.of(
                             total,
-                            allocationSize(variable.getInitializer().get(), state, ipc, currentMethod))));
+                            allocationSize(variable.getInitializer().get(), state, ipc, currentMethod, entryIdentity, false))));
                 }
             }
             return total;
         }
         if (expression instanceof AssignExpr assign) {
-            return allocationSize(assign.getValue(), state, ipc, currentMethod);
+            return allocationSize(assign.getValue(), state, ipc, currentMethod, entryIdentity, false);
         }
         if (expression instanceof MethodCallExpr call) {
+            Optional<ComplexityExpr> helperSpace = tryAnalyzeHelperCallSpace(
+                    call, state, ipc, currentMethod, entryIdentity, passThroughReturn);
+            if (helperSpace.isPresent()) {
+                return helperSpace.get();
+            }
             Optional<JdkBoundCall> jdk = tryBindJdkCall(call, state, call.getNameAsString());
             if (jdk.isPresent()) {
-                noteJdkAllocationSpacePolicy(jdk.get().allocation(), state);
-                return ComplexityExpr.one();
+                return composeJdkAllocationForSpace(jdk.get().allocation(), state, passThroughReturn);
             }
+        }
+        return ComplexityExpr.one();
+    }
+
+    private ComplexityExpr composeJdkAllocationForSpace(
+            ComplexityExpr allocation,
+            AnalysisState state,
+            boolean passThroughReturn) {
+        if (passThroughReturn || !isNonTrivialJdkAllocation(allocation)) {
+            return ComplexityExpr.one();
+        }
+        return ComplexityExprSimplifier.simplify(allocation);
+    }
+
+    private Optional<ComplexityExpr> tryAnalyzeHelperCallSpace(
+            MethodCallExpr call,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity,
+            boolean passThroughReturn) {
+        String methodName = call.getNameAsString();
+        if (call.getScope().isPresent() || ipc.userMethods.candidatesInType(state.declaringTypeName, methodName).isEmpty()) {
+            return Optional.empty();
+        }
+        UserMethodOverloadResolver.Resolution resolution = UserMethodOverloadResolver.resolveUnqualifiedCall(
+                call,
+                state.declaringTypeName,
+                ipc.userMethods,
+                state.localNameToType,
+                state.paramTypes);
+        if (resolution.outcome() != UserMethodOverloadResolver.ResolutionOutcome.RESOLVED) {
+            return Optional.empty();
+        }
+        MethodIdentity target = resolution.identity();
+        if (target.equals(entryIdentity)) {
+            return Optional.empty();
+        }
+        MethodSpaceSummary summary = resolveHelperSpaceSummary(
+                call, state, ipc, currentMethod, entryIdentity, target, resolution.declaration(), 0);
+        if (summary.incomplete()) {
+            state.markSpaceIncomplete(StaticAnalysisReasonCode.HELPER_SPACE_EFFECT_INCOMPLETE);
+        }
+        return Optional.of(summary.callerOwnedEffect(passThroughReturn));
+    }
+
+    private MethodSpaceSummary resolveHelperSpaceSummary(
+            MethodCallExpr call,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity caller,
+            MethodIdentity entryIdentity,
+            MethodIdentity target,
+            MethodDeclaration method,
+            int depth) {
+        String summaryKey = target.cacheKey() + "#spaceSummary";
+        String pendingKey = summaryKey + "#pending";
+        MethodSpaceSummary cached = ipc.helperSpaceSummaryMemo.get(summaryKey);
+        if (cached != null) {
+            return cached;
+        }
+        if (ipc.helperSpaceSummaryMemo.containsKey(pendingKey)) {
+            state.markSpaceIncomplete(StaticAnalysisReasonCode.HELPER_SPACE_EFFECT_INCOMPLETE);
+            return MethodSpaceSummary.empty().mergeIncomplete(true);
+        }
+        if (depth > MAX_HELPER_ANALYSIS_DEPTH) {
+            state.markSpaceIncomplete(StaticAnalysisReasonCode.HELPER_SPACE_EFFECT_INCOMPLETE);
+            return MethodSpaceSummary.empty().mergeIncomplete(true);
+        }
+        ipc.helperSpaceSummaryMemo.put(pendingKey, MethodSpaceSummary.empty());
+        AnalysisState helperState = state.forkForHelper(method);
+        ComplexityExpr auxiliaryPeak = analyzeBlockSpacePeak(
+                method.getBody().orElse(new BlockStmt()),
+                helperState,
+                ipc,
+                target,
+                entryIdentity,
+                false);
+        ComplexityExpr returnedAllocation = maxReturnedAllocationMagnitude(method, helperState, ipc, target, entryIdentity);
+        boolean incomplete = helperState.spaceCompleteness == AnalysisDimensionCompleteness.INCOMPLETE;
+        MethodSpaceSummary summary = new MethodSpaceSummary(auxiliaryPeak, returnedAllocation, incomplete);
+        ipc.helperSpaceSummaryMemo.remove(pendingKey);
+        ipc.helperSpaceSummaryMemo.put(summaryKey, summary);
+        return summary;
+    }
+
+    private ComplexityExpr maxReturnedAllocationMagnitude(
+            MethodDeclaration method,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity) {
+        ComplexityExpr peak = ComplexityExpr.one();
+        for (ReturnStmt returnStmt : method.findAll(ReturnStmt.class)) {
+            if (returnStmt.getExpression().isEmpty()) {
+                continue;
+            }
+            ComplexityExpr magnitude = rawAllocationMagnitude(
+                    returnStmt.getExpression().get(), state, ipc, currentMethod, entryIdentity);
+            peak = ComplexityExprSimplifier.branchWorstCase(peak, magnitude);
+        }
+        return peak;
+    }
+
+    private ComplexityExpr rawAllocationMagnitude(
+            Expression expression,
+            AnalysisState state,
+            InterproceduralContext ipc,
+            MethodIdentity currentMethod,
+            MethodIdentity entryIdentity) {
+        if (expression instanceof ArrayCreationExpr array && !array.getLevels().isEmpty()) {
+            return arrayAllocationMagnitude(array, state, ipc, currentMethod);
+        }
+        if (expression instanceof MethodCallExpr call) {
+            Optional<ComplexityExpr> helper = tryAnalyzeHelperCallSpace(
+                    call, state, ipc, currentMethod, entryIdentity, true);
+            if (helper.isPresent()) {
+                return helper.get();
+            }
+            Optional<JdkBoundCall> jdk = tryBindJdkCall(call, state, call.getNameAsString());
+            if (jdk.isPresent()) {
+                return ComplexityExprSimplifier.simplify(jdk.get().allocation());
+            }
+        }
+        if (expression instanceof NameExpr) {
+            return ComplexityExpr.one();
         }
         return ComplexityExpr.one();
     }

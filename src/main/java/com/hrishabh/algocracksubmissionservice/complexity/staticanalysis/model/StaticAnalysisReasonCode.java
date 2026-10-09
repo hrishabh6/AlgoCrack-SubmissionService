@@ -29,10 +29,24 @@ public enum StaticAnalysisReasonCode {
     JDK_CALLBACK_COST_UNRESOLVED,
     JDK_CALLSITE_SUBSTITUTION_FAILED,
     USER_TYPE_SHADOWS_JDK,
-    JDK_ALLOCATION_NOT_COMPOSED;
+    JDK_ALLOCATION_NOT_COMPOSED,
+    OUTPUT_OWNERSHIP_UNRESOLVED,
+    ALLOCATION_ESCAPE_UNRESOLVED,
+    HELPER_SPACE_EFFECT_INCOMPLETE,
+    COLLECTION_GROWTH_UNRESOLVED,
+    ALLOCATION_LIFETIME_UNRESOLVED,
+    RECURSIVE_LIVE_ALLOCATION_UNSUPPORTED,
+    MUTABLE_STATIC_STATE,
+    GLOBAL_RETENTION_UNRESOLVED;
 
-    /** Space-only reasons must not invalidate an otherwise complete time dimension (Batch 3 closure). */
+    /** Space-only reasons must not invalidate an otherwise complete time dimension (Batch 3+ closure). */
     public boolean blocksTimeAuthoritativeness() {
-        return this != JDK_ALLOCATION_NOT_COMPOSED;
+        return switch (this) {
+            case JDK_ALLOCATION_NOT_COMPOSED, OUTPUT_OWNERSHIP_UNRESOLVED, ALLOCATION_ESCAPE_UNRESOLVED,
+                    HELPER_SPACE_EFFECT_INCOMPLETE, COLLECTION_GROWTH_UNRESOLVED, ALLOCATION_LIFETIME_UNRESOLVED,
+                    RECURSIVE_LIVE_ALLOCATION_UNSUPPORTED, MUTABLE_STATIC_STATE, GLOBAL_RETENTION_UNRESOLVED ->
+                    false;
+            default -> true;
+        };
     }
 }

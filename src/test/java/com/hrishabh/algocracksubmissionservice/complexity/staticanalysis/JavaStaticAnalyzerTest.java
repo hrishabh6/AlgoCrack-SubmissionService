@@ -104,7 +104,7 @@ class JavaStaticAnalyzerTest {
                   }
                 }
                 """, "solve", metadata("n", "int"));
-        assertEquals("O(n)", ComplexityExprSimplifier.toBigOString(result.spaceExpression()));
+        assertEquals("O(1)", ComplexityExprSimplifier.toBigOString(result.spaceExpression()));
     }
 
     @Test
