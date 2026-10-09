@@ -285,6 +285,73 @@ class ComplexityWorklistBatch5Test {
     }
 
     @Test
+    void stringCompareToIsNotConstantTime() {
+        StaticAnalysisResult result = analyze("""
+                class Solution {
+                  public int solve(int n) {
+                    boolean[] seen = new boolean[n];
+                    java.util.PriorityQueue<String> heap =
+                        new java.util.PriorityQueue<>((a, b) -> a.compareTo(b));
+                    heap.offer(0);
+                    while (!heap.isEmpty()) {
+                      int x = heap.poll();
+                      int next = x + 1;
+                      if (next < n && !seen[next]) {
+                        seen[next] = true;
+                        heap.offer(next);
+                      }
+                    }
+                    return 0;
+                  }
+                }
+                """, meta("n", "int"));
+        assertEquals("UNKNOWN", time(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.JDK_CALLBACK_COST_UNRESOLVED));
+        assertNotEquals(ComplexityConfidence.HIGH, result.timeConfidence());
+        assertEquals("O(n)", space(result));
+    }
+
+    @Test
+    void userCompareToIsNotConstantTime() {
+        StaticAnalysisResult result = analyze("""
+                class Item implements java.lang.Comparable<Item> {
+                  int n;
+                  public int compareTo(Item other) {
+                    for (int i = 0; i < n; i++) {}
+                    return n - other.n;
+                  }
+                }
+                class Solution {
+                  public int solve(int n) {
+                    boolean[] seen = new boolean[n];
+                    java.util.PriorityQueue<Item> heap =
+                        new java.util.PriorityQueue<>((Item a, Item b) -> a.compareTo(b));
+                    heap.offer(0);
+                    while (!heap.isEmpty()) {
+                      int x = heap.poll();
+                      int next = x + 1;
+                      if (next < n && !seen[next]) {
+                        seen[next] = true;
+                        heap.offer(next);
+                      }
+                    }
+                    return 0;
+                  }
+                }
+                """, meta("n", "int"));
+        assertEquals("UNKNOWN", time(result));
+        assertTrue(result.reasonCodes().contains(StaticAnalysisReasonCode.JDK_CALLBACK_COST_UNRESOLVED));
+        assertEquals("O(n)", space(result));
+    }
+
+    @Test
+    void integerCompareOfFieldsStaysConstant() {
+        StaticAnalysisResult result = analyze(gridHeap("seen", "heap"), meta("matrix", "int[][]"));
+        assertEquals("O(n * m * log(n * m))", time(result));
+        assertEquals(ComplexityConfidence.HIGH, result.timeConfidence());
+    }
+
+    @Test
     void unresolvedComparatorKeepsTimeUnknown() {
         StaticAnalysisResult result = analyze("""
                 class Cell { int h; Cell(int h){ this.h = h; } }

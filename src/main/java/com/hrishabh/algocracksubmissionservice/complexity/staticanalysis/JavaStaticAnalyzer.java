@@ -1189,7 +1189,7 @@ public class JavaStaticAnalyzer {
             return arrayAllocationMagnitude(array, state, ipc, currentMethod);
         }
         if (expression instanceof ObjectCreationExpr creation) {
-            if (creation.getArguments().isEmpty()) {
+            if (creation.getArguments().isEmpty() || creation.getArgument(0) instanceof LambdaExpr) {
                 return ComplexityExpr.one();
             }
             return sizeOrEvaluationCost(
@@ -1538,28 +1538,80 @@ public class JavaStaticAnalyzer {
             if (body.isEmpty()) {
                 return false;
             }
-            return comparisonLeavesAreShallow(body.get());
+            return isConstantTimeComparison(body.get(), lambda);
         }
 
-        private static boolean comparisonLeavesAreShallow(Expression expression) {
+        private static boolean isConstantTimeComparison(Expression expression, LambdaExpr lambda) {
+            if (expression instanceof EnclosedExpr enclosed) {
+                return isConstantTimeComparison(enclosed.getInner(), lambda);
+            }
             if (expression instanceof MethodCallExpr call) {
-                String name = call.getNameAsString();
-                if (!"compare".equals(name) && !"compareTo".equals(name)) {
+                if (!call.getArguments().stream().allMatch(JavaStaticAnalyzer.AnalysisState::isShallowValue)) {
                     return false;
                 }
-                return call.getArguments().stream().allMatch(JavaStaticAnalyzer.AnalysisState::comparisonLeavesAreShallow)
-                        && call.getScope().map(JavaStaticAnalyzer.AnalysisState::comparisonLeavesAreShallow).orElse(true);
+                if ("compare".equals(call.getNameAsString()) && call.getScope().isPresent()
+                        && isFixedWidthCompareOwner(call.getScope().get())) {
+                    return true;
+                }
+                if ("compareTo".equals(call.getNameAsString()) && call.getScope().isPresent()) {
+                    return fixedWidthType(call.getScope().get(), lambda);
+                }
+                return false;
             }
             if (expression instanceof BinaryExpr binary && binary.getOperator() == BinaryExpr.Operator.MINUS) {
-                return comparisonLeavesAreShallow(binary.getLeft()) && comparisonLeavesAreShallow(binary.getRight());
+                return fixedWidthType(binary.getLeft(), lambda) && fixedWidthType(binary.getRight(), lambda);
             }
+            return false;
+        }
+
+        private static boolean isShallowValue(Expression expression) {
             if (expression instanceof EnclosedExpr enclosed) {
-                return comparisonLeavesAreShallow(enclosed.getInner());
+                return isShallowValue(enclosed.getInner());
             }
             if (expression instanceof FieldAccessExpr access) {
-                return comparisonLeavesAreShallow(access.getScope());
+                return isShallowValue(access.getScope());
             }
             return expression instanceof NameExpr || expression instanceof LiteralExpr;
+        }
+
+        private static boolean isFixedWidthCompareOwner(Expression scope) {
+            if (!(scope instanceof NameExpr name)) {
+                return false;
+            }
+            String simple = name.getNameAsString();
+            int dot = simple.lastIndexOf('.');
+            if (dot >= 0) {
+                simple = simple.substring(dot + 1);
+            }
+            return switch (simple) {
+                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "Boolean" -> true;
+                default -> false;
+            };
+        }
+
+        private static boolean fixedWidthType(Expression expression, LambdaExpr lambda) {
+            if (expression instanceof EnclosedExpr enclosed) {
+                return fixedWidthType(enclosed.getInner(), lambda);
+            }
+            if (expression instanceof LiteralExpr) {
+                return expression instanceof IntegerLiteralExpr || expression instanceof LongLiteralExpr
+                        || expression instanceof DoubleLiteralExpr || expression instanceof CharLiteralExpr;
+            }
+            if (!(expression instanceof NameExpr name)) {
+                return false;
+            }
+            for (Parameter parameter : lambda.getParameters()) {
+                if (!parameter.getNameAsString().equals(name.getNameAsString()) || parameter.getType().isUnknownType()) {
+                    continue;
+                }
+                String erased = MethodIdentity.eraseType(parameter.getType().asString());
+                return switch (erased) {
+                    case "int", "Integer", "long", "Long", "short", "Short", "byte", "Byte", "char", "Character",
+                            "double", "Double", "float", "Float", "boolean", "Boolean" -> true;
+                    default -> false;
+                };
+            }
+            return false;
         }
 
         boolean comparatorCostProvenForCall(MethodCallExpr call) {
@@ -1591,7 +1643,7 @@ public class JavaStaticAnalyzer {
                 return false;
             }
             return switch (typeArg) {
-                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "String", "int", "long",
+                case "Integer", "Long", "Double", "Float", "Short", "Byte", "Character", "int", "long",
                         "double", "float", "short", "byte", "char" -> true;
                 default -> false;
             };
