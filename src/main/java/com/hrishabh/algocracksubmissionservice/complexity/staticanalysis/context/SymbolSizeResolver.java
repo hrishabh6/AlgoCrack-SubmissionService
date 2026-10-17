@@ -55,8 +55,13 @@ public final class SymbolSizeResolver {
         if (expression instanceof FieldAccessExpr access && "length".equals(access.getNameAsString())) {
             return resolveLengthAccess(access.getScope());
         }
-        if (expression instanceof MethodCallExpr call && "size".equals(call.getNameAsString()) && call.getScope().isPresent()) {
-            return resolveCollectionSize(call.getScope().get());
+        if (expression instanceof MethodCallExpr call && call.getArguments().isEmpty() && call.getScope().isPresent()) {
+            if ("size".equals(call.getNameAsString())) {
+                return resolveCollectionSize(call.getScope().get());
+            }
+            if ("length".equals(call.getNameAsString())) {
+                return resolveStringLength(call.getScope().get());
+            }
         }
         if (expression instanceof IntegerLiteralExpr literal) {
             try {
@@ -113,6 +118,17 @@ public final class SymbolSizeResolver {
             return resolveLengthAccess(nested.getScope());
         }
         return Optional.empty();
+    }
+
+    private Optional<ComplexityExpr> resolveStringLength(Expression scope) {
+        if (!(scope instanceof NameExpr name)) {
+            return Optional.empty();
+        }
+        ParameterShapeRegistry.ParameterShape shape = shapeByParamName.get(name.getNameAsString());
+        if (shape == null || shape.rawType() == null || !shape.rawType().replace(" ", "").equals("String")) {
+            return Optional.empty();
+        }
+        return Optional.of(ComplexityExpr.var(shape.primarySymbol()));
     }
 
     private Optional<ComplexityExpr> resolveCollectionSize(Expression receiver) {

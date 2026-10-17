@@ -43,6 +43,9 @@ import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.C
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.MethodSpaceSummary;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.space.ReturnAllocationSupport;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.worklist.WorklistStructuralProof;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileLookup;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileView;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticShapeAdapter;
 import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -61,29 +64,65 @@ public class JavaStaticAnalyzer {
     private final JdkKnowledgeBase knowledgeBase;
 
     public StaticAnalysisResult analyze(String source, QuestionMetadataApiDto metadata) {
-        return analyzeInternal(source, metadata, true);
+        return analyze(source, metadata, null);
+    }
+
+    public StaticAnalysisResult analyze(String source, QuestionMetadataApiDto metadata, SemanticProfileLookup semantic) {
+        return analyzeInternal(source, metadata, true, semantic);
     }
 
     /**
      * Test/snippet helper — allows metadata-free entry resolution fallback. Not used in production pipeline.
      */
     public StaticAnalysisResult analyzeSnippet(String source, QuestionMetadataApiDto metadata) {
-        return analyzeInternal(source, metadata, false);
+        return analyzeInternal(source, metadata, false, null);
     }
 
-    private StaticAnalysisResult analyzeInternal(String source, QuestionMetadataApiDto metadata, boolean requireMetadataEntry) {
+    private StaticAnalysisResult analyzeInternal(
+            String source,
+            QuestionMetadataApiDto metadata,
+            boolean requireMetadataEntry,
+            SemanticProfileLookup semantic) {
         List<StaticFindingDraft> findings = new ArrayList<>();
         List<String> limitations = new ArrayList<>();
         try {
             CompilationUnit unit = StaticJavaParser.parse(source);
+            if (semantic != null && semantic.usable() && SemanticShapeAdapter.isDesignClass(semantic.profile())) {
+                return analyzeDesignClass(unit, metadata, semantic, findings, limitations);
+            }
             Optional<MethodDeclaration> entry = resolveEntryMethod(unit, metadata, requireMetadataEntry);
             if (entry.isEmpty()) {
                 return unsupported(findings, limitations, "ENTRY_METHOD_UNRESOLVED",
                         "Could not resolve entry method for complexity analysis");
             }
             MethodDeclaration entryMethod = entry.get();
-            Map<String, String> variables = mergeVariables(metadata, entryMethod);
-            AnalysisState state = new AnalysisState(findings, limitations, variables, knowledgeBase, unit, entryMethod, metadata);
+            SemanticShapeAdapter.Adapted adapted = semantic != null && semantic.usable()
+                    ? SemanticShapeAdapter.adaptFunction(metadata, entryMethod, semantic.profile())
+                    : null;
+            return analyzeResolvedMethod(unit, metadata, entryMethod, adapted, semantic, findings, limitations);
+        } catch (Exception ex) {
+            findings.add(new StaticFindingDraft("PARSER", null, null, null, "NONE",
+                    "Parse failed: " + safeMessage(ex.getMessage())));
+            return unsupported(findings, limitations, "PARSER_UNSUPPORTED", "Java source could not be parsed");
+        }
+    }
+
+    private StaticAnalysisResult analyzeResolvedMethod(
+            CompilationUnit unit,
+            QuestionMetadataApiDto metadata,
+            MethodDeclaration entryMethod,
+            SemanticShapeAdapter.Adapted adapted,
+            SemanticProfileLookup semantic,
+            List<StaticFindingDraft> findings,
+            List<String> limitations) {
+        try {
+            Map<String, String> variables = adapted != null
+                    ? new LinkedHashMap<>(adapted.variables())
+                    : mergeVariables(metadata, entryMethod);
+            AnalysisState state = new AnalysisState(
+                    findings, limitations, variables, knowledgeBase, unit, entryMethod, metadata,
+                    adapted == null ? null : adapted.shapes());
+            noteMutatedInputs(semantic, findings);
 
             detectMutableStatic(unit, state);
 
@@ -248,6 +287,105 @@ public class JavaStaticAnalyzer {
             } else {
                 state.markSpaceIncomplete(StaticAnalysisReasonCode.UNDEFINED_SYMBOL);
             }
+        }
+    }
+
+    private StaticAnalysisResult analyzeDesignClass(
+            CompilationUnit unit,
+            QuestionMetadataApiDto metadata,
+            SemanticProfileLookup semantic,
+            List<StaticFindingDraft> findings,
+            List<String> limitations) {
+        SemanticProfileView.Entry entry = semantic.profile().entry();
+        Optional<ClassOrInterfaceDeclaration> type = unit.findAll(ClassOrInterfaceDeclaration.class).stream()
+                .filter(candidate -> candidate.getNameAsString().equals(entry.className()))
+                .findFirst();
+        if (type.isEmpty()) {
+            return unsupported(findings, limitations, "ENTRY_METHOD_UNRESOLVED",
+                    "Could not resolve design class " + entry.className());
+        }
+        List<SemanticProfileView.Operation> operations = entry.operations().stream()
+                .filter(operation -> "METHOD".equals(operation.role()))
+                .toList();
+        List<StaticAnalysisResult> parts = new ArrayList<>();
+        for (SemanticProfileView.Operation operation : operations) {
+            int arity = operation.parameters() == null ? 0 : operation.parameters().size();
+            List<MethodDeclaration> matches = type.get().getMethodsByName(operation.name()).stream()
+                    .filter(method -> !method.isAbstract())
+                    .filter(method -> method.getParameters().size() == arity)
+                    .toList();
+            if (matches.size() != 1) {
+                findings.add(new StaticFindingDraft(
+                        "SEMANTIC_OPERATION", null, null, operation.name(), "NONE",
+                        "Operation " + operation.name() + "/" + arity + " is not a unique declared method"));
+                continue;
+            }
+            List<StaticFindingDraft> operationFindings = new ArrayList<>();
+            List<String> operationLimitations = new ArrayList<>();
+            SemanticShapeAdapter.Adapted adapted = SemanticShapeAdapter.adaptOperation(
+                    matches.get(0), semantic.profile(), operation.name());
+            StaticAnalysisResult part = analyzeResolvedMethod(
+                    unit, metadata, matches.get(0), adapted, null, operationFindings, operationLimitations);
+            parts.add(part);
+            findings.add(new StaticFindingDraft(
+                    "SEMANTIC_OPERATION",
+                    null,
+                    null,
+                    operation.name(),
+                    "HIGH",
+                    operation.name() + " time " + ComplexityExprSimplifier.toBigOString(part.timeExpression())
+                            + "; space " + ComplexityExprSimplifier.toBigOString(part.spaceExpression())));
+            findings.addAll(operationFindings);
+        }
+        if (parts.isEmpty()) {
+            return unsupported(findings, limitations, "ENTRY_METHOD_UNRESOLVED",
+                    "Could not resolve a declared design-class operation");
+        }
+        noteMutatedInputs(semantic, findings);
+        if (parts.size() == 1) {
+            return parts.get(0);
+        }
+        limitations.add("SEMANTIC_MULTI_ENTRY");
+        Map<String, String> variables = new LinkedHashMap<>();
+        for (StaticAnalysisResult part : parts) {
+            if (part.variables() != null) {
+                variables.putAll(part.variables());
+            }
+        }
+        return new StaticAnalysisResult(
+                ComplexityResultKind.UNSUPPORTED,
+                new ComplexityExpr.Unknown("SEMANTIC_MULTI_ENTRY"),
+                ComplexityBoundBasis.WORST_CASE,
+                null,
+                new ComplexityExpr.Unknown("SEMANTIC_MULTI_ENTRY"),
+                null,
+                variables,
+                findings,
+                limitations,
+                List.of("Design-class operations were analyzed independently"),
+                null,
+                List.of(StaticAnalysisReasonCode.INCOMPLETE_TIME_ANALYSIS),
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                AnalysisDimensionCompleteness.INCOMPLETE,
+                null);
+    }
+
+    private static void noteMutatedInputs(SemanticProfileLookup semantic, List<StaticFindingDraft> findings) {
+        if (semantic == null || !semantic.usable() || semantic.profile().mutatedInputs() == null) {
+            return;
+        }
+        for (SemanticProfileView.MutatedInput mutated : semantic.profile().mutatedInputs()) {
+            if (mutated.parameterIndex() == null) {
+                continue;
+            }
+            findings.add(new StaticFindingDraft(
+                    "SEMANTIC_MUTATED_INPUT",
+                    null,
+                    null,
+                    Integer.toString(mutated.parameterIndex()),
+                    "HIGH",
+                    "Parameter " + mutated.parameterIndex() + " is a mutated input"
+                            + (mutated.structureKind() == null ? "" : " (" + mutated.structureKind() + ")")));
         }
     }
 
@@ -1448,13 +1586,16 @@ public class JavaStaticAnalyzer {
                 JdkKnowledgeBase knowledgeBase,
                 CompilationUnit compilationUnit,
                 MethodDeclaration entryMethod,
-                QuestionMetadataApiDto metadata) {
+                QuestionMetadataApiDto metadata,
+                List<ParameterShapeRegistry.ParameterShape> semanticShapes) {
             this.findings = findings;
             this.limitations = limitations;
             this.variables = variables;
             this.compilationUnit = compilationUnit;
             this.paramTypes = buildDeclaredTypes(compilationUnit, entryMethod);
-            this.parameterShapes = buildParameterShapes(metadata, entryMethod);
+            this.parameterShapes = semanticShapes != null
+                    ? semanticShapes
+                    : buildParameterShapes(metadata, entryMethod);
             this.paramNameToSymbol = buildParamNameToSymbol(parameterShapes);
             this.sizeResolver = new SymbolSizeResolver(parameterShapes);
         }

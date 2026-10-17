@@ -1,5 +1,8 @@
 package com.hrishabh.algocracksubmissionservice.client;
 
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileLookup;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileResponse;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileResponseInterpreter;
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityProfileApiDtos.CasesRequest;
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityProfileApiDtos.CasesResponse;
 import com.hrishabh.algocracksubmissionservice.complexity.dto.ComplexityProfileApiDtos.ProfileMetadataResponse;
@@ -18,6 +21,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -82,6 +87,32 @@ public class ProblemServiceClient {
         log.debug("Fetching oracle from internal endpoint: {}", url);
         return restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), ReferenceSolutionDto.class)
                 .getBody();
+    }
+
+    /**
+     * Loads the Java Semantic Metadata V1 profile. A missing, stale, incompatible,
+     * unchecked, or unreachable profile is returned as an unusable lookup and does not throw.
+     */
+    public SemanticProfileLookup getSemanticProfile(long questionId) {
+        String url = UriComponentsBuilder.fromHttpUrl(problemServiceUrl
+                        + "/api/v1/internal/questions/" + questionId + "/semantic-profile")
+                .queryParam("language", "JAVA")
+                .toUriString();
+        try {
+            SemanticProfileResponse body = restTemplate.exchange(
+                            url, HttpMethod.GET, new HttpEntity<>(internalHeaders()), SemanticProfileResponse.class)
+                    .getBody();
+            String json = body == null ? "" : new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(body);
+            return SemanticProfileResponseInterpreter.interpret(200, json);
+        } catch (HttpStatusCodeException ex) {
+            return SemanticProfileResponseInterpreter.interpret(ex.getStatusCode().value(), ex.getResponseBodyAsString());
+        } catch (RestClientException ex) {
+            log.debug("Semantic profile unavailable questionId={}", questionId, ex);
+            return SemanticProfileResponseInterpreter.interpretTransportFailure();
+        } catch (Exception ex) {
+            log.debug("Semantic profile read failed questionId={}", questionId, ex);
+            return SemanticProfileResponseInterpreter.interpretTransportFailure();
+        }
     }
 
     public Optional<ProfileMetadataResponse> getActiveComplexityProfile(long questionId, String language) {

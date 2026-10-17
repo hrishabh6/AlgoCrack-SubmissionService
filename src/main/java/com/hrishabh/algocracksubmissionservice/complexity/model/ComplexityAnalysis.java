@@ -82,6 +82,22 @@ public class ComplexityAnalysis {
     @Column(name = "profile_hash", length = 64)
     private String profileHash;
 
+    @Column(name = "semantic_profile_id", length = 64)
+    private String semanticProfileId;
+
+    @Column(name = "semantic_profile_version", length = 32)
+    private String semanticProfileVersion;
+
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "semantic_profile_hash", length = 64)
+    private String semanticProfileHash;
+
+    @Column(name = "semantic_profile_state", length = 32)
+    private String semanticProfileState;
+
+    @Column(name = "semantic_profile_json", columnDefinition = "json")
+    private String semanticProfileJson;
+
     @Column(name = "generator_version", length = 32)
     private String generatorVersion;
 
