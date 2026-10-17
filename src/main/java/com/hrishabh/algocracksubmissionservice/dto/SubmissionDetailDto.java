@@ -3,6 +3,7 @@ package com.hrishabh.algocracksubmissionservice.dto;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrishabh.algocracksubmissionservice.models.Submission;
+import com.hrishabh.algocracksubmissionservice.progress.dto.PotdSubmissionOutcomeDto;
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
 
@@ -37,6 +38,7 @@ public class SubmissionDetailDto {
     private LocalDateTime queuedAt;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
+    private PotdSubmissionOutcomeDto dailyChallenge;
 
     /**
      * Convert from entity to DTO.
@@ -63,6 +65,12 @@ public class SubmissionDetailDto {
                 .startedAt(submission.getStartedAt())
                 .completedAt(submission.getCompletedAt())
                 .build();
+    }
+
+    public static SubmissionDetailDto fromEntity(Submission submission, PotdSubmissionOutcomeDto dailyChallenge) {
+        SubmissionDetailDto dto = fromEntity(submission);
+        dto.setDailyChallenge(dailyChallenge);
+        return dto;
     }
 
     /**
