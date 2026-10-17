@@ -25,6 +25,9 @@ class ComplexityAnalysisFingerprintReuseTest {
                 ComplexityVersionConstants.DEFAULT_HARNESS_VERSION,
                 ComplexityVersionConstants.MEASUREMENT_POLICY_VERSION,
                 null,
-                path);
+                path,
+                null,
+                null,
+                null);
     }
 }

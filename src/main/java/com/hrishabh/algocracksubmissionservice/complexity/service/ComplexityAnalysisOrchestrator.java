@@ -38,6 +38,9 @@ import com.hrishabh.algocracksubmissionservice.complexity.reconciliation.Complex
 import com.hrishabh.algocracksubmissionservice.complexity.reconciliation.ComplexityReconciliationEngine;
 import com.hrishabh.algocracksubmissionservice.complexity.reconciliation.ReconciliationInput;
 import com.hrishabh.algocracksubmissionservice.complexity.reconciliation.ReconciliationOutcome;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileAvailability;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileLookup;
+import com.hrishabh.algocracksubmissionservice.complexity.semantic.SemanticProfileView;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityAnalysisRepository;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityBenchmarkRunRepository;
 import com.hrishabh.algocracksubmissionservice.complexity.repository.ComplexityStaticFindingRepository;
@@ -130,7 +133,7 @@ public class ComplexityAnalysisOrchestrator {
         }
         Submission submission = submissionRepository.findBySubmissionId(analysis.getSubmissionId()).orElseThrow();
         QuestionMetadataApiDto metadata = fetchMetadataSafely(analysis.getQuestionId());
-        StaticAnalysisResult result = staticAnalyzer.analyze(submission.getCode(), metadata);
+        StaticAnalysisResult result = analyzeWithSemanticProfile(analysis, submission.getCode(), metadata);
         findingRepository.deleteByAnalysisId(analysis.getAnalysisId());
         persistFindings(analysis.getAnalysisId(), result.findings());
         applyStaticDraft(analysis, result);
@@ -303,7 +306,7 @@ public class ComplexityAnalysisOrchestrator {
         }
         Submission submission = submissionRepository.findBySubmissionId(analysis.getSubmissionId()).orElseThrow();
         QuestionMetadataApiDto metadata = fetchMetadataSafely(analysis.getQuestionId());
-        StaticAnalysisResult staticResult = staticAnalyzer.analyze(submission.getCode(), metadata);
+        StaticAnalysisResult staticResult = analyzeWithSemanticProfile(analysis, submission.getCode(), metadata);
 
         List<TimingObservation> observations = loadObservations(analysis.getAnalysisId());
         int usableCount = (int) observations.stream().filter(TimingObservation::usableForInference).count();
@@ -467,7 +470,8 @@ public class ComplexityAnalysisOrchestrator {
             return;
         }
         Submission submission = submissionRepository.findBySubmissionId(analysis.getSubmissionId()).orElseThrow();
-        StaticAnalysisResult staticResult = staticAnalyzer.analyze(submission.getCode(), fetchMetadataSafely(analysis.getQuestionId()));
+        StaticAnalysisResult staticResult = analyzeWithSemanticProfile(
+                analysis, submission.getCode(), fetchMetadataSafely(analysis.getQuestionId()));
         applyStaticDraft(analysis, staticResult);
         List<String> limitations = jsonSupport.readStringList(analysis.getLimitationsJson());
         limitations.add(code);
@@ -534,6 +538,11 @@ public class ComplexityAnalysisOrchestrator {
         target.setSpaceConfidence(source.getSpaceConfidence());
         target.setLimitationsJson(source.getLimitationsJson());
         target.setVariableDefinitionsJson(source.getVariableDefinitionsJson());
+        target.setSemanticProfileId(source.getSemanticProfileId());
+        target.setSemanticProfileVersion(source.getSemanticProfileVersion());
+        target.setSemanticProfileHash(source.getSemanticProfileHash());
+        target.setSemanticProfileState(source.getSemanticProfileState());
+        target.setSemanticProfileJson(source.getSemanticProfileJson());
         target.setStatus(ComplexityProcessingStatus.COMPLETED);
         target.setCompletedAt(LocalDateTime.now());
         target.setActiveSlot(null);
@@ -595,7 +604,10 @@ public class ComplexityAnalysisOrchestrator {
                         ? analysis.getMeasurementPolicyVersion()
                         : ComplexityVersionConstants.MEASUREMENT_POLICY_VERSION,
                 analysis.getProfilerRuntimeVersion(),
-                interpretationPath(analysis)));
+                interpretationPath(analysis),
+                analysis.getSemanticProfileId(),
+                analysis.getSemanticProfileVersion(),
+                analysis.getSemanticProfileHash()));
     }
 
     private QuestionMetadataDto toCxeMetadata(QuestionMetadataApiDto metadata, long questionId) {
@@ -613,6 +625,73 @@ public class ComplexityAnalysisOrchestrator {
                 Map.of(),
                 metadata.getQuestionType(),
                 metadata.getIsOutputOrderMatters());
+    }
+
+    private StaticAnalysisResult analyzeWithSemanticProfile(
+            ComplexityAnalysis analysis, String source, QuestionMetadataApiDto metadata) {
+        SemanticProfileLookup lookup = resolveSemanticLookup(analysis);
+        StaticAnalysisResult result = staticAnalyzer.analyze(source, metadata, lookup.usable() ? lookup : null);
+        return lookup.limitationCode() == null ? result : result.withLimitation(lookup.limitationCode());
+    }
+
+    private SemanticProfileLookup resolveSemanticLookup(ComplexityAnalysis analysis) {
+        if (analysis.getSemanticProfileState() != null) {
+            return storedSemanticLookup(analysis);
+        }
+        SemanticProfileLookup fetched = problemServiceClient.getSemanticProfile(analysis.getQuestionId());
+        analysis.setSemanticProfileState(fetched.availability().name());
+        analysis.setSemanticProfileId(fetched.profileId());
+        analysis.setSemanticProfileVersion(fetched.semanticVersion());
+        analysis.setSemanticProfileHash(fetched.profileHash());
+        if (!fetched.usable()) {
+            return fetched;
+        }
+        try {
+            analysis.setSemanticProfileJson(objectMapper.writeValueAsString(fetched.profile()));
+            return fetched;
+        } catch (Exception ex) {
+            log.debug("Semantic profile could not be stored analysisId={}", analysis.getAnalysisId(), ex);
+            analysis.setSemanticProfileState(SemanticProfileAvailability.UNAVAILABLE.name());
+            analysis.setSemanticProfileJson(null);
+            return SemanticProfileLookup.unavailable();
+        }
+    }
+
+    private SemanticProfileLookup storedSemanticLookup(ComplexityAnalysis analysis) {
+        SemanticProfileAvailability availability;
+        try {
+            availability = SemanticProfileAvailability.valueOf(analysis.getSemanticProfileState());
+        } catch (IllegalArgumentException ex) {
+            return SemanticProfileLookup.unavailable();
+        }
+        if (!availability.usable()) {
+            return new SemanticProfileLookup(
+                    availability,
+                    analysis.getSemanticProfileId(),
+                    null,
+                    analysis.getSemanticProfileVersion(),
+                    analysis.getSemanticProfileHash(),
+                    null);
+        }
+        try {
+            SemanticProfileView profile = objectMapper.readValue(analysis.getSemanticProfileJson(), SemanticProfileView.class);
+            return new SemanticProfileLookup(
+                    SemanticProfileAvailability.COMPATIBLE,
+                    analysis.getSemanticProfileId(),
+                    profile.schemaVersion(),
+                    analysis.getSemanticProfileVersion(),
+                    analysis.getSemanticProfileHash(),
+                    profile);
+        } catch (Exception ex) {
+            log.debug("Stored semantic profile is unreadable analysisId={}", analysis.getAnalysisId(), ex);
+            return new SemanticProfileLookup(
+                    SemanticProfileAvailability.STALE,
+                    analysis.getSemanticProfileId(),
+                    null,
+                    analysis.getSemanticProfileVersion(),
+                    analysis.getSemanticProfileHash(),
+                    null);
+        }
     }
 
     private QuestionMetadataApiDto fetchMetadataSafely(Long questionId) {

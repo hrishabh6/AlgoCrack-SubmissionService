@@ -25,6 +25,7 @@ public final class ComplexityAnalysisFingerprint {
         joiner.add(nullToEmpty(input.profilerRuntimeVersion()));
         joiner.add(ComplexityVersionConstants.RECONCILIATION_VERSION);
         joiner.add(input.interpretationPath());
+        joiner.add(semanticComponent(input));
         return sha256(joiner.toString());
     }
 
@@ -39,7 +40,19 @@ public final class ComplexityAnalysisFingerprint {
             String harnessVersion,
             String measurementPolicyVersion,
             String profilerRuntimeVersion,
-            String interpretationPath) {
+            String interpretationPath,
+            String semanticProfileId,
+            String semanticProfileVersion,
+            String semanticProfileHash) {
+    }
+
+    private static String semanticComponent(FingerprintInput input) {
+        if (input.semanticProfileHash() == null || input.semanticProfileHash().isBlank()) {
+            return ComplexityVersionConstants.NO_SEMANTIC_SENTINEL;
+        }
+        return nullToEmpty(input.semanticProfileId())
+                + "@" + nullToEmpty(input.semanticProfileVersion())
+                + "@" + input.semanticProfileHash();
     }
 
     private static String nullToEmpty(String value) {

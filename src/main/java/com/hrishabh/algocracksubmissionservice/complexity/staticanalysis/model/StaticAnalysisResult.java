@@ -4,6 +4,7 @@ import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityConfid
 import com.hrishabh.algocracksubmissionservice.complexity.model.ComplexityResultKind;
 import com.hrishabh.algocracksubmissionservice.complexity.staticanalysis.expr.ComplexityExpr;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public record StaticAnalysisResult(
@@ -48,6 +49,33 @@ public record StaticAnalysisResult(
                 && timeExpression != null
                 && !(timeExpression instanceof ComplexityExpr.Unknown)
                 && reasonCodes.isEmpty();
+    }
+
+    public StaticAnalysisResult withLimitation(String code) {
+        if (code == null || (limitations != null && limitations.contains(code))) {
+            return this;
+        }
+        List<String> next = new ArrayList<>();
+        if (limitations != null) {
+            next.addAll(limitations);
+        }
+        next.add(code);
+        return new StaticAnalysisResult(
+                resultKind,
+                timeExpression,
+                timeBoundBasis,
+                timeConfidence,
+                spaceExpression,
+                spaceConfidence,
+                variables,
+                findings,
+                next,
+                evidenceSummaries,
+                errorCode,
+                reasonCodes,
+                timeCompleteness,
+                spaceCompleteness,
+                diagnosticTimeExpression);
     }
 
     public boolean hasAuthoritativeStaticSpace() {
