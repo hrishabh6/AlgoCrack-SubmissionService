@@ -3,6 +3,7 @@ package com.hrishabh.algocracksubmissionservice.service;
 import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.models.*;
 import com.hrishabh.algocracksubmissionservice.dto.*;
+import com.hrishabh.algocracksubmissionservice.progress.service.PotdCompletionService;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ public class SubmissionService {
     private final SubmissionRepository submissionRepository;
     private final ProblemServiceClient problemServiceClient;
     private final SubmissionProcessingService processingService;
+    private final PotdCompletionService potdCompletionService;
 
     /**
      * Create a new submission and trigger async processing.
@@ -72,7 +74,10 @@ public class SubmissionService {
      */
     public Optional<SubmissionDetailDto> findBySubmissionId(String submissionId) {
         return submissionRepository.findBySubmissionId(submissionId)
-                .map(SubmissionDetailDto::fromEntity);
+                .map(submission -> {
+                    var potd = potdCompletionService.outcomeForSubmission(submission).orElse(null);
+                    return SubmissionDetailDto.fromEntity(submission, potd);
+                });
     }
 
     /**
