@@ -276,8 +276,22 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
     /**
      * Determine internal execution status from CXE status.
      */
-    private BatchExecutionResult.ExecutionStatus determineStatus(SubmissionStatusDto status) {
-        // Check for compilation error
+    BatchExecutionResult.ExecutionStatus determineStatus(SubmissionStatusDto status) {
+        String category = status.getErrorMessage() == null ? "" : status.getErrorMessage().trim();
+        if ("INTERNAL_ERROR".equalsIgnoreCase(category)) {
+            return BatchExecutionResult.ExecutionStatus.INTERNAL_ERROR;
+        }
+        if ("COMPILATION_ERROR".equalsIgnoreCase(category)) {
+            return BatchExecutionResult.ExecutionStatus.COMPILATION_ERROR;
+        }
+        if ("TIME_LIMIT_EXCEEDED".equalsIgnoreCase(category)) {
+            return BatchExecutionResult.ExecutionStatus.TIMEOUT;
+        }
+        if ("RUNTIME_ERROR".equalsIgnoreCase(category)) {
+            return BatchExecutionResult.ExecutionStatus.RUNTIME_ERROR;
+        }
+
+        // Older payloads only put javac text in compilationOutput.
         if (status.getCompilationOutput() != null && !status.getCompilationOutput().isEmpty()) {
             String lower = status.getCompilationOutput().toLowerCase();
             if (lower.contains("error:") || lower.contains("cannot find symbol") ||
@@ -286,7 +300,6 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
             }
         }
 
-        // Check for runtime error
         if (status.getErrorMessage() != null && !status.getErrorMessage().isEmpty()) {
             String lower = status.getErrorMessage().toLowerCase();
             if (lower.contains("timeout")) {
