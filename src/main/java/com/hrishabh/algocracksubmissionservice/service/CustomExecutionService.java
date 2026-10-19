@@ -1,5 +1,6 @@
 package com.hrishabh.algocracksubmissionservice.service;
 
+import com.hrishabh.algocracksubmissionservice.adapter.CxeExecutionPoll;
 import com.hrishabh.algocracksubmissionservice.client.ProblemServiceClient;
 import com.hrishabh.algocracksubmissionservice.dto.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -141,25 +142,11 @@ public class CustomExecutionService {
      * Poll CXE for completion.
      */
     private SubmissionStatusDto pollForCompletion(String submissionId) {
-        int maxAttempts = 60; // 30 seconds max
-        int pollIntervalMs = 500;
-
-        for (int i = 0; i < maxAttempts; i++) {
-            SubmissionStatusDto status = cxeClient.getStatus(submissionId);
-
-            if ("COMPLETED".equals(status.getStatus()) || "FAILED".equals(status.getStatus())) {
-                return cxeClient.getResults(submissionId);
-            }
-
-            try {
-                Thread.sleep(pollIntervalMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Polling interrupted", e);
-            }
-        }
-
-        throw new RuntimeException("Execution timeout after " + (maxAttempts * pollIntervalMs / 1000) + " seconds");
+        return CxeExecutionPoll.poll(
+                submissionId,
+                () -> cxeClient.getStatus(submissionId),
+                cxeClient::getResults,
+                Thread::sleep);
     }
 
     /**

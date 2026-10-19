@@ -35,6 +35,12 @@ management:
     health:
       show-details: when_authorized
 
+statistics:
+  outbox-batch-size: ${STATISTICS_OUTBOX_BATCH_SIZE:25}
+  outbox-poll-ms: ${STATISTICS_OUTBOX_POLL_MS:2000}
+  retry-backoff-ms: ${STATISTICS_RETRY_BACKOFF_MS:25}
+  dispatch-on-commit: ${STATISTICS_DISPATCH_ON_COMMIT:true}
+
 gamification:
   badge:
     graph-tag-name: Graph
@@ -76,6 +82,8 @@ complexity:
 cxe:
   service:
     url: ${CXE_SERVICE_URL:http://code-execution-engine:8081}
+    # Not applied to the WebClient. Execution polling uses CxeExecutionPoll (50s),
+    # which stays above the 40s Kubernetes Job deadline.
     timeout-seconds: 30
 
 # Async Processing Configuration

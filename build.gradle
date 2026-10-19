@@ -59,4 +59,6 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
     environment 'DOCKER_HOST', System.getenv('DOCKER_HOST') ?: 'unix:///var/run/docker.sock'
+    // docker-java defaults to API 1.32, which Docker 29 rejects. 1.44 is inside this daemon's supported range.
+    systemProperty 'api.version', System.getenv('DOCKER_API_VERSION') ?: '1.44'
 }

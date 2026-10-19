@@ -26,6 +26,7 @@ import com.hrishabh.algocracksubmissionservice.progress.repository.UserProblemSo
 import com.hrishabh.algocracksubmissionservice.progress.repository.UserProgressRepository;
 import com.hrishabh.algocracksubmissionservice.progress.repository.UserTopicProgressRepository;
 import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
+import jakarta.persistence.EntityManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,6 +63,7 @@ public class ProgressRecalculationService {
     private final BadgeEngine badgeEngine;
     private final BadgeAwardService badgeAwardService;
     private final Clock clock;
+    private final EntityManager entityManager;
 
     public ProgressRecalculationService(
             SubmissionRepository submissionRepository,
@@ -75,7 +77,8 @@ public class ProgressRecalculationService {
             UserBadgeRepository userBadgeRepository,
             BadgeEngine badgeEngine,
             BadgeAwardService badgeAwardService,
-            Clock clock) {
+            Clock clock,
+            EntityManager entityManager) {
         this.submissionRepository = submissionRepository;
         this.problemServiceClient = problemServiceClient;
         this.userProblemSolveRepository = userProblemSolveRepository;
@@ -88,6 +91,7 @@ public class ProgressRecalculationService {
         this.badgeEngine = badgeEngine;
         this.badgeAwardService = badgeAwardService;
         this.clock = clock;
+        this.entityManager = entityManager;
     }
 
     @Transactional
@@ -261,6 +265,9 @@ public class ProgressRecalculationService {
         dailyChallengeCompletionRepository.deleteByUserId(userId);
         userTopicProgressRepository.deleteByUserIdAndRankAlgorithmVersion(userId, RankConstants.ALGORITHM_VERSION);
         userProgressRepository.deleteByUserIdAndRankAlgorithmVersion(userId, RankConstants.ALGORITHM_VERSION);
+        // Derived deletes are scheduled entity removals. Flush them before the rebuilt
+        // rows are inserted, or MySQL rejects the new row while the old unique key remains.
+        entityManager.flush();
     }
 
     private UserProgress persistEmptyProgress(String userId) {

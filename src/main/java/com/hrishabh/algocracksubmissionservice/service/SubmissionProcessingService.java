@@ -8,17 +8,11 @@ import com.hrishabh.algocracksubmissionservice.dto.QuestionMetadataApiDto;
 import com.hrishabh.algocracksubmissionservice.dto.TestCaseDto;
 import com.hrishabh.algocracksubmissionservice.dto.internal.*;
 import com.hrishabh.algocracksubmissionservice.judging.*;
-import com.hrishabh.algocracksubmissionservice.progress.service.PotdCompletionService;
-import com.hrishabh.algocracksubmissionservice.progress.service.ProgressOutboxService;
-import com.hrishabh.algocracksubmissionservice.repository.QuestionStatisticsRepository;
-import com.hrishabh.algocracksubmissionservice.repository.SubmissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -34,6 +28,10 @@ import java.util.stream.Collectors;
  *
  * Error handling (compilation, runtime, timeout) stays in this orchestration
  * layer. Only semantic correctness flows through the JudgingPipeline.
+ *
+ * CXE calls are not wrapped in a database transaction. The verdict commits
+ * before question statistics are applied, so a statistics version conflict
+ * cannot roll a finished submission back to QUEUED.
  */
 @Slf4j
 @Service
@@ -42,14 +40,10 @@ public class SubmissionProcessingService {
 
     private final ExecutionAdapter executionAdapter;
     private final PipelineAssembler pipelineAssembler;
-    private final SubmissionRepository submissionRepository;
-    private final QuestionStatisticsRepository statsRepository;
     private final ProblemServiceClient problemServiceClient;
-    private final WebSocketService webSocketService;
     private final OracleExecutionService oracleExecutionService;
     private final ObjectMapper objectMapper;
-    private final ProgressOutboxService progressOutboxService;
-    private final PotdCompletionService potdCompletionService;
+    private final SubmissionFinalizer submissionFinalizer;
 
     /**
      * Process submission asynchronously.
@@ -58,59 +52,57 @@ public class SubmissionProcessingService {
      *                     avoid detached entity issues)
      */
     @Async("submissionExecutor")
-    @Transactional
     public void processSubmission(String submissionId) {
         log.info("Starting async processing for submission: {}", submissionId);
 
-        // Re-fetch submission within this transaction to avoid detached entity issues
-        Submission submission = submissionRepository.findBySubmissionId(submissionId)
-                .orElseThrow(() -> new RuntimeException("Submission not found: " + submissionId));
-
         try {
-            // 1. Update status to COMPILING
-            submission.setStatus(SubmissionStatus.COMPILING);
-            submission.setStartedAt(LocalDateTime.now());
-            submission = submissionRepository.save(submission);
-            webSocketService.sendStatus(submission);
-
-            // 2. Fetch question metadata and test cases via ProblemService API
-            Long questionId = submission.getQuestionId();
-            QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(
-                    questionId, submission.getLanguage().toUpperCase());
-            if (metadata == null) {
-                throw new RuntimeException(
-                        "Question metadata not found for questionId: " + questionId + ", language: " + submission.getLanguage());
+            SubmissionSnapshot snapshot = submissionFinalizer.loadSnapshot(submissionId);
+            if (SubmissionFinalizer.isTerminalStatus(snapshot.status())) {
+                log.info("Submission {} is already terminal; skipping duplicate processing", submissionId);
+                return;
             }
 
-            // Fetch HIDDEN testcases via ProblemService API
+            submissionFinalizer.markInProgress(submissionId, SubmissionStatus.COMPILING);
+            if (submissionFinalizer.isTerminal(submissionId)) {
+                return;
+            }
+
+            Long questionId = snapshot.questionId();
+            QuestionMetadataApiDto metadata = problemServiceClient.getMetadata(
+                    questionId, snapshot.language().toUpperCase());
+            if (metadata == null) {
+                throw new IllegalStateException(
+                        "Question metadata not found for questionId: " + questionId + ", language: " + snapshot.language());
+            }
+
             List<TestCaseDto> testCases = problemServiceClient.getTestCases(questionId, "HIDDEN");
 
-            // 3. Build CodeBundle and execute via adapter (same pipeline as RUN and ORACLE)
             List<TestCaseInput> testCaseInputs = testCases.stream()
                     .map(tc -> TestCaseInput.builder().input(tc.getInput()).build())
                     .collect(Collectors.toList());
 
-            CodeBundle userBundle = buildCodeBundle(submission, metadata, testCaseInputs);
+            CodeBundle userBundle = buildCodeBundle(snapshot, metadata, testCaseInputs);
 
-            // 4. Update status to RUNNING
-            submission.setStatus(SubmissionStatus.RUNNING);
-            submission = submissionRepository.save(submission);
-            webSocketService.sendStatus(submission);
-
-            // 5. Execute user code via adapter
-            log.info("Executing user code for: {}", submissionId);
-            BatchExecutionResult userResult = executionAdapter.execute(userBundle);
-
-            // 6. Handle execution-layer errors BEFORE pipeline
-            // (compilation, runtime, timeout — these are not semantic correctness issues)
-            if (!userResult.isSuccess()) {
-                SubmissionVerdict errorVerdict = mapExecutionErrorToVerdict(userResult);
-                log.info("Execution error for {}: {}", submissionId, errorVerdict);
-                finalizeSubmission(submission, errorVerdict, userResult, null);
+            submissionFinalizer.markInProgress(submissionId, SubmissionStatus.RUNNING);
+            if (submissionFinalizer.isTerminal(submissionId)) {
                 return;
             }
 
-            // 7. Execute oracle to get expected outputs
+            log.info("Executing user code for: {}", submissionId);
+            BatchExecutionResult userResult = executionAdapter.execute(userBundle);
+
+            if (!userResult.isSuccess()) {
+                SubmissionVerdict errorVerdict = mapExecutionErrorToVerdict(userResult);
+                log.info("Execution error for {}: {}", submissionId, errorVerdict);
+                submissionFinalizer.finalizeSubmission(submissionId,
+                        completion(errorVerdict, userResult, false));
+                return;
+            }
+
+            if (submissionFinalizer.isTerminal(submissionId)) {
+                return;
+            }
+
             log.info("Executing oracle for question: {}", questionId);
             List<TestCaseInput> oracleInputs = testCases.stream()
                     .map(tc -> TestCaseInput.builder().input(tc.getInput()).build())
@@ -119,27 +111,36 @@ public class SubmissionProcessingService {
 
             if (!oracleResult.isSuccess()) {
                 log.error("Oracle execution failed for question {}: {}", questionId, oracleResult.getStatus());
-                finalizeSubmission(submission, SubmissionVerdict.INTERNAL_ERROR, userResult, null);
+                submissionFinalizer.finalizeSubmission(submissionId,
+                        completion(SubmissionVerdict.INTERNAL_ERROR, userResult, true));
                 return;
             }
 
-            // 8. Judge via JudgingPipeline (same pipeline as RUN path)
             SubmissionVerdict verdict = judgeViaPipeline(userResult, oracleResult, metadata);
-
-            // 9. Finalize submission
-            finalizeSubmission(submission, verdict, userResult,
-                    buildTestResultsJson(userResult.getOutputs()));
+            submissionFinalizer.finalizeSubmission(submissionId,
+                    completion(verdict, userResult, true));
 
         } catch (Exception e) {
             log.error("Processing failed for {}: {}", submissionId, e.getMessage(), e);
-
-            submission.setStatus(SubmissionStatus.FAILED);
-            submission.setErrorMessage(e.getMessage());
-            submission.setCompletedAt(LocalDateTime.now());
-            submissionRepository.save(submission);
-
-            webSocketService.sendError(submission, e.getMessage());
+            try {
+                submissionFinalizer.markFailed(submissionId, e.getMessage());
+            } catch (RuntimeException markFailed) {
+                log.error("Could not persist failure for submission {}", submissionId, markFailed);
+            }
         }
+    }
+
+    private SubmissionCompletion completion(SubmissionVerdict verdict, BatchExecutionResult userResult,
+            boolean executionSucceeded) {
+        return new SubmissionCompletion(
+                verdict,
+                userResult.getTotalRuntimeMs() != null ? userResult.getTotalRuntimeMs().intValue() : null,
+                userResult.getPeakMemoryKb() != null ? userResult.getPeakMemoryKb().intValue() : null,
+                buildTestResultsJson(userResult.getOutputs()),
+                userResult.getCompilationOutput(),
+                userResult.getErrorMessage(),
+                userResult.getWorkerId(),
+                executionSucceeded);
     }
 
     /**
@@ -221,40 +222,6 @@ public class SubmissionProcessingService {
     }
 
     /**
-     * Finalize submission with results and notify client.
-     */
-    private void finalizeSubmission(Submission submission, SubmissionVerdict verdict,
-            BatchExecutionResult userResult, String testResults) {
-        submission.setStatus(SubmissionStatus.COMPLETED);
-        submission.setVerdict(verdict);
-        submission.setRuntimeMs(userResult.getTotalRuntimeMs() != null
-                ? userResult.getTotalRuntimeMs().intValue()
-                : null);
-        submission.setMemoryKb(userResult.getPeakMemoryKb() != null
-                ? userResult.getPeakMemoryKb().intValue()
-                : null);
-        submission.setCompletedAt(LocalDateTime.now());
-        submission.setWorkerId(userResult.getWorkerId());
-        submission.setTestResults(testResults != null ? testResults
-                : buildTestResultsJson(userResult.getOutputs()));
-        submission.setCompilationOutput(userResult.getCompilationOutput());
-        submission.setErrorMessage(userResult.getErrorMessage());
-        submissionRepository.save(submission);
-        if (verdict == SubmissionVerdict.ACCEPTED) {
-            potdCompletionService.recordAcceptedSubmission(submission);
-        }
-        progressOutboxService.enqueueAcceptedSubmission(submission);
-
-        log.info("Submission {} completed with verdict: {}", submission.getSubmissionId(), verdict);
-
-        // Update question statistics
-        updateQuestionStatistics(submission);
-
-        // Notify client
-        webSocketService.sendResult(submission);
-    }
-
-    /**
      * Build JudgingContext from question metadata.
      * Identical logic to UnifiedExecutionService.buildJudgingContext().
      */
@@ -315,7 +282,7 @@ public class SubmissionProcessingService {
     /**
      * Build CodeBundle for user submission execution.
      */
-    private CodeBundle buildCodeBundle(Submission submission, QuestionMetadataApiDto metadata,
+    private CodeBundle buildCodeBundle(SubmissionSnapshot snapshot, QuestionMetadataApiDto metadata,
             List<TestCaseInput> testcases) {
         List<CodeBundle.Parameter> params = new ArrayList<>();
         List<String> paramNames = metadata.getParamNames();
@@ -328,7 +295,7 @@ public class SubmissionProcessingService {
         }
 
         CodeBundle.QuestionMetadataBundle metaBundle = CodeBundle.QuestionMetadataBundle.builder()
-                .fullyQualifiedPackageName("com.algocrack.solution.q" + submission.getQuestionId())
+                .fullyQualifiedPackageName("com.algocrack.solution.q" + snapshot.questionId())
                 .functionName(metadata.getFunctionName())
                 .returnType(metadata.getReturnType())
                 .parameters(params)
@@ -339,11 +306,11 @@ public class SubmissionProcessingService {
                 .build();
 
         return CodeBundle.builder()
-                .executionId(submission.getSubmissionId())
-                .code(submission.getCode())
-                .language(Language.valueOf(submission.getLanguage().toUpperCase()))
-                .questionId(submission.getQuestionId())
-                .userId(submission.getUserId())
+                .executionId(snapshot.submissionId())
+                .code(snapshot.code())
+                .language(Language.valueOf(snapshot.language().toUpperCase()))
+                .questionId(snapshot.questionId())
+                .userId(snapshot.userId())
                 .testcases(testcases)
                 .metadata(metaBundle)
                 .intent(ExecutionIntent.SUBMIT)
@@ -375,29 +342,5 @@ public class SubmissionProcessingService {
             log.error("Failed to serialize test results: {}", e.getMessage());
             return "[]";
         }
-    }
-
-    /**
-     * Update question statistics after submission completes.
-     */
-    @Transactional
-    public void updateQuestionStatistics(Submission submission) {
-        Long questionId = submission.getQuestionId();
-
-        QuestionStatistics stats = statsRepository.findByQuestionId(questionId)
-                .orElseGet(() -> QuestionStatistics.builder()
-                        .questionId(questionId)
-                        .totalSubmissions(0)
-                        .acceptedSubmissions(0)
-                        .build());
-
-        stats.incrementSubmissions(
-                submission.getVerdict() == SubmissionVerdict.ACCEPTED,
-                submission.getRuntimeMs(),
-                submission.getMemoryKb());
-
-        statsRepository.save(stats);
-        log.debug("Updated statistics for question {}: total={}, accepted={}",
-                questionId, stats.getTotalSubmissions(), stats.getAcceptedSubmissions());
     }
 }

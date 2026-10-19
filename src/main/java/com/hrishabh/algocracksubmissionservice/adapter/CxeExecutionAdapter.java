@@ -38,9 +38,6 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
     private final ProblemServiceClient problemServiceClient;
     private final ObjectMapper objectMapper;
 
-    private static final int MAX_POLL_ATTEMPTS = 60;
-    private static final int POLL_INTERVAL_MS = 500;
-
     @Override
     public BatchExecutionResult execute(CodeBundle codeBundle) {
         structuredLogger.info("CXE execution started",
@@ -222,23 +219,11 @@ public class CxeExecutionAdapter implements ExecutionAdapter {
      * Poll CXE for completion.
      */
     private SubmissionStatusDto pollForCompletion(String submissionId) {
-        for (int i = 0; i < MAX_POLL_ATTEMPTS; i++) {
-            SubmissionStatusDto status = cxeClient.getStatus(submissionId);
-
-            if ("COMPLETED".equals(status.getStatus()) || "FAILED".equals(status.getStatus())) {
-                return cxeClient.getResults(submissionId);
-            }
-
-            try {
-                Thread.sleep(POLL_INTERVAL_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Polling interrupted", e);
-            }
-        }
-
-        throw new RuntimeException(
-                "Execution timeout after " + (MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS / 1000) + " seconds");
+        return CxeExecutionPoll.poll(
+                submissionId,
+                () -> cxeClient.getStatus(submissionId),
+                cxeClient::getResults,
+                Thread::sleep);
     }
 
     /**

@@ -14,6 +14,7 @@ import com.hrishabh.algocracksubmissionservice.progress.repository.UserProgressR
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -38,8 +39,10 @@ public class PotdCompletionService {
     /**
      * Records the first qualifying accepted submission for a published daily challenge.
      * Idempotent per user/challenge via {@code uk_dcc_user_challenge}.
+     * Requires a new transaction because completion is dispatched after the verdict commits,
+     * while Spring still has the finished transaction's synchronization active.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<PotdSubmissionOutcomeDto> recordAcceptedSubmission(Submission submission) {
         if (submission.getVerdict() != SubmissionVerdict.ACCEPTED) {
             return Optional.empty();

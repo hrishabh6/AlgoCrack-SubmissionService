@@ -2,9 +2,11 @@ package com.hrishabh.algocracksubmissionservice.repository;
 
 import com.hrishabh.algocracksubmissionservice.models.Submission;
 import com.hrishabh.algocracksubmissionservice.models.SubmissionStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -115,4 +117,16 @@ public interface SubmissionRepository extends JpaRepository<Submission, Long> {
                           AND s.verdict = com.hrishabh.algocracksubmissionservice.models.SubmissionVerdict.ACCEPTED
                         """)
         List<String> findDistinctAcceptedUserIds();
+
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("SELECT s FROM Submission s WHERE s.submissionId = :submissionId")
+        Optional<Submission> findBySubmissionIdForUpdate(@Param("submissionId") String submissionId);
+
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("""
+                        SELECT s FROM Submission s
+                        WHERE s.questionId = :questionId
+                          AND s.status = com.hrishabh.algocracksubmissionservice.models.SubmissionStatus.COMPLETED
+                        """)
+        List<Submission> findCompletedByQuestionIdForUpdate(@Param("questionId") Long questionId);
 }
