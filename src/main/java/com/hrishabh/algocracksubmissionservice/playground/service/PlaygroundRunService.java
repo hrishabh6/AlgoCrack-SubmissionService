@@ -37,6 +37,10 @@ public class PlaygroundRunService {
         }
 
         String language = workspaceService.normalizeRunLanguage(request.language());
+        if (!"JAVA".equals(language)) {
+            playgroundMetrics.recordRunRejection("unsupported_language");
+            throw new ValidationException("Playground execution supports Java only");
+        }
         String source = workspaceService.validateRunSource(request.sourceCode());
         String stdin = workspaceService.validateRunStdin(request.stdin());
 

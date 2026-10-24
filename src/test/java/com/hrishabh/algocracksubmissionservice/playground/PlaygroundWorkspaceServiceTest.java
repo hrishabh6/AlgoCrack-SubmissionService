@@ -42,4 +42,9 @@ class PlaygroundWorkspaceServiceTest {
     void rejectsUnsupportedLanguage() {
         assertThrows(ValidationException.class, () -> service.normalizeRunLanguage("RUST"));
     }
+
+    @Test
+    void savedSnippetsStillAcceptPython() {
+        org.junit.jupiter.api.Assertions.assertEquals("PYTHON", service.normalizeRunLanguage("python"));
+    }
 }
